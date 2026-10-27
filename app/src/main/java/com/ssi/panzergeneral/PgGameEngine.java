@@ -297,6 +297,58 @@ public class PgGameEngine {
         return baseDef != null && baseDef.canCaptureCityOrAirport();
     }
 
+    public boolean hasAvailableAction(PgDatabase.ActiveUnit u) {
+        if (u == null || !u.isAxis || u.strength <= 0 || !isPlayerTurn) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def == null) return false;
+
+        // 1. Can the unit attack any valid target?
+        if (!u.attacked) {
+            List<PgDatabase.ActiveUnit> targets = getValidTargets(u);
+            if (!targets.isEmpty()) return true;
+        }
+
+        // Fortifications cannot move or take transport actions; if they cannot attack, they have no actions
+        if (def.isFortification()) {
+            return false;
+        }
+
+        // 2. Can the unit move to any reachable hex?
+        if (!u.moved && getRemainingMovementPoints(u) > 0) {
+            Map<Integer, Integer> reach = getReachableHexes(u);
+            if (reach.size() > 1) {
+                return true;
+            }
+        }
+
+        // If the unit has already moved or attacked, it cannot perform non-combat actions like supply, reinforce, mount, or upgrade
+        if (u.moved || u.movePointsUsed > 0 || u.attacked) {
+            return false;
+        }
+
+        // 3. Can the unit mount/dismount/embark/disembark?
+        if (canUseTransportAction(u)) {
+            return true;
+        }
+
+        // 4. Can the unit take replacements (regular or elite)?
+        if (canReinforceUnit(u, false) || canReinforceUnit(u, true)) {
+            return true;
+        }
+
+        // 5. Can the unit upgrade?
+        if (canUpgradeUnit(u)) {
+            return true;
+        }
+
+        // 6. Can the unit resupply ammo or fuel?
+        if (supplyEnabled && ((def.maxAmmo > 0 && u.ammo < def.maxAmmo) || (def.maxFuel > 0 && u.fuel < def.maxFuel))) {
+            return true;
+        }
+
+        return false;
+    }
+
     public boolean hasEnemyAdjacentOrOnHex(int col, int row, boolean isAxis) {
         if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
         PgDatabase.ActiveUnit gOn = getUnitAt(col, row, false);

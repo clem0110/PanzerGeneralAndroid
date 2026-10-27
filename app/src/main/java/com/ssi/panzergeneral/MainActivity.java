@@ -713,7 +713,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void selectNextUnmovedUnit() {
-        if (engine.units.isEmpty()) return;
+        if (engine.units.isEmpty() || !engine.isPlayerTurn) return;
         int startIdx = 0;
         if (mapView.selectedUnit != null) {
             int idx = engine.units.indexOf(mapView.selectedUnit);
@@ -721,12 +721,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
         for (int i = 0; i < engine.units.size(); i++) {
             PgDatabase.ActiveUnit u = engine.units.get((startIdx + i) % engine.units.size());
-            if (u.isAxis && u.strength > 0) {
-                PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-                if (def.isFortification()) {
-                    if (u.attacked || engine.getValidTargets(u).isEmpty()) continue;
-                } else if (u.moved && u.attacked) {
-                    continue;
+            if (engine.hasAvailableAction(u)) {
+                if (u == mapView.selectedUnit) {
+                    Toast.makeText(this, "Only " + db.equipment.get(u.unitDefId).name + " has actions remaining.", Toast.LENGTH_SHORT).show();
                 }
                 mapView.centerOnHex(u.col, u.row);
                 mapView.selectUnit(u);
