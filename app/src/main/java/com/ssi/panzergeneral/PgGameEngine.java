@@ -291,6 +291,12 @@ public class PgGameEngine {
         return false;
     }
 
+    public boolean canUnitCaptureCityOrAirport(PgDatabase.ActiveUnit u) {
+        if (u == null || u.unitDefId <= 0 || u.unitDefId >= db.equipment.size()) return false;
+        PgDatabase.UnitDef baseDef = db.equipment.get(u.unitDefId);
+        return baseDef != null && baseDef.canCaptureCityOrAirport();
+    }
+
     public boolean hasEnemyAdjacentOrOnHex(int col, int row, boolean isAxis) {
         if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
         PgDatabase.ActiveUnit gOn = getUnitAt(col, row, false);
@@ -355,9 +361,10 @@ public class PgGameEngine {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
                 if (cell.terrainType == targetBaseTerrain) {
-                    // Update ownership if currently occupied by an Axis ground unit
+                    // Update ownership if currently occupied by an Axis ground unit capable of capturing
                     PgDatabase.ActiveUnit gndOcc = getUnitAt(c, r, false);
-                    if (gndOcc != null && gndOcc.isAxis && !db.isAxisNation(cell.ownerNation, scenario)) {
+                    if (gndOcc != null && gndOcc.isAxis && canUnitCaptureCityOrAirport(gndOcc)
+                            && !db.isAxisNation(cell.ownerNation, scenario)) {
                         cell.ownerNation = gndOcc.nation;
                     }
 
@@ -957,6 +964,13 @@ public class PgGameEngine {
         PgDatabase.HexCell cell = scenario.grid[col][row];
         boolean isCityPortAirfield = (cell.terrainType == 8 || cell.terrainType == 6 || cell.isPort());
         if (!cell.isObjective && !isCityPortAirfield && cell.ownerNation == 0) return;
+
+        // 1994 Panzer General Rule:
+        // Artillery (and AA/Air/Naval/Forts) cannot take possession of cities or airports.
+        // Only infantry, recon, tanks, and anti-tank guns can capture.
+        if (!canUnitCaptureCityOrAirport(capturer)) {
+            return;
+        }
 
         boolean wasEnemy = db.isAxisNation(cell.ownerNation, scenario) != capturer.isAxis;
         cell.ownerNation = capturer.nation;

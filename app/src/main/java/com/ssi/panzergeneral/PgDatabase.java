@@ -119,6 +119,13 @@ public class PgDatabase {
             String n = name.toLowerCase(Locale.ROOT);
             return n.contains("fort") || n.contains("bunker") || n.contains("strongpoint");
         }
+
+        public boolean canCaptureCityOrAirport() {
+            return unitClass == CLASS_INFANTRY
+                    || unitClass == CLASS_TANK
+                    || unitClass == CLASS_RECON
+                    || unitClass == CLASS_ANTI_TANK;
+        }
     }
 
     @Data

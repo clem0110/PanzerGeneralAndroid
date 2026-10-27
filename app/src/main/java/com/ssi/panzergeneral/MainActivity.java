@@ -660,6 +660,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     public void onUnitMoved(PgDatabase.ActiveUnit unit, int col, int row) {
         refreshHud();
         checkScenarioCompletion();
+        PgDatabase.HexCell cell = (engine.scenario != null && col >= 0 && col < engine.scenario.cols && row >= 0 && row < engine.scenario.rows)
+                ? engine.scenario.grid[col][row] : null;
+        if (unit != null && unit.isAxis && cell != null && (cell.terrainType == 8 || cell.terrainType == 6 || cell.isObjective)) {
+            if (!engine.canUnitCaptureCityOrAirport(unit) && !db.isAxisNation(cell.ownerNation, engine.scenario)) {
+                Toast.makeText(this, db.equipment.get(unit.unitDefId).name + " cannot capture cities or airports. Use infantry, recon, tanks, or AT guns.", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     @Override
