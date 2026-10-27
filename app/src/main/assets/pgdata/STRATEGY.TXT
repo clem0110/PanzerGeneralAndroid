@@ -1,0 +1,106 @@
+Panzer General Strategy Notes
+
+(1). Glossary Of Key Terms 
+
+(2). Tactical Overview
+
+(3). Combined Arms
+
+Panzer General was conceived as an easy-to-play but challenging-to-master tactical/operational wargame in which the player, taking the role of a general, leads an increasingly experienced combined arms force through a linked series of battles making up a complete campaign.
+
+(1). Glossary Of Key Terms
+
+Entrenchment
+Entrenchment levels are a key concept in the game: units able to dig into a prepared position are tougher to root out. Entrenchment levels can be reduced by attacking or bombarding a ground unit. Entrenchment levels are a feature of units, not terrain, but affect combat much as terrain does -- they make a devastating rugged defense more likely. 
+In the game, the way to attack a strongly entrenched unit is with a combination of aerial and artillery preparatory bombardment, followed by ground attacks by one or more units.  Entrenching takes time unless a unit begins a scenario entrenched. Some units can take more advantage of ground and therefore can entrench more quickly than others in the game.  Moving units have a zero entrenchment level, but gain the base entrenchment level of the particular terrain they end in when they stop. 
+
+Experience
+In addition to getting a chance of shooting first, experienced units lose fewer casualties and inflict more casualties than would otherwise be the case. Units gain experience by fighting and gain the most by destroying enemy with better experience or equipment or at least forcing them to retreat. 
+Building upunits to overstrength status is a combination of numbers and quality can smash some enemy units with a single attack. Building up to overstrength takes time, however, and artillery and air bombardment against you have the annoying effect of cutting these units back down to size.
+
+Prestige Costs
+The prestige cost of units only roughly correlates with their effectiveness, so examine combat values closely before purchasing or upgrading equipment. Remember that an expensive purchase or upgrade has to be balanced against the need for enough prestige to afford elite replacements for your Core units during a tough battle.
+Maximum fuel capacity and especially maximum ammo capacity need to be carefully examined. This is even more of a constraint if the unit is advancing than if stationary on defense. Remember that a unit can easily use up several rounds of ammo in a turn if repeatedly attacked (or if providing defensive fire in support of adjacent units that are being attacked). 
+Close defense is another statistic that you can regret you overlooked if the unit runs into infantry in the woods and city hexes common on most battlefields, because you defend using your close defense rather than ground defense value. Make sure to check enemy unit types and strength. 
+Start by comparing your attack values and defense values against each  other to see who has more destructive potential in a fair fight. Then compare initiative values to see who is more likely to initiate combat first, bearing in mind that unit experience can count for as much as 3 initiative levels. 
+Experience tends to be very important in fighter combat, where initiative values don't differ much and where attack values are high relative to defense values -- the better pilot often gets in a devastating first shot. It is less important in early-war tank warfare, where attack values tend to be relatively lower compared with defense values. 
+
+
+Replacements
+Don't let your units fight until destroyed -- if you can pull them out with even 1 strength point left, they can be rebuilt more cheaply per strength point than buying a new unit (even if using elite replacements) and get to keep their experience as a bonus.  This represents the importance of veteran cadres to the performance of new recruits. 
+The importance of preserving units has many tactical implications. One is to ensure that units which risk heavy losses shoot before moving so they can retreat to safety if grievously weakened. The corollary of this principle is, of course, to mercilessly wipe out crippled enemy units to keep the enemy from rebuilding them.  
+
+Rugged Defense
+The concept of "rugged defense" represents ambush or the ability to open fire with surprise at close range, conditions which favor the defender and can devastate an attacker. Rugged defense really helps infantry, particularly well entrenched infantry. 
+Repeated attacks on such a unit, however, will disrupt an entrenched unit, force it out of good tactical positions and give the attacker intelligence useful for further attacks.  
+
+Terrain
+Careful attention to terrain is well worth it. Rivers are probably the most significant obstacle and make excellent positions to defend behind. Bridging units are very helpful in terrain with many rivers but few roads or bridges. Cities, besides being victory objectives and prestigious to capture and hold, are the next most significant obstacle because of the strength they offer the defense -- important advantages in cities, swamps and mountains are that the effect of the opposing equipments' initiative difference is minimized (because of the close range combat involved) and entrenchment and experience levels become key. 
+Cities, woods and mountains also allow defending and attacking infantry to shoot against the close defense number of the enemy unit as mentioned above (except that infantry attacking against infantry who succeed in putting up a rugged defense shoot at the defender's ground defense value).
+
+Weather
+Bad weather generally helps the defender and helps the side with air inferiority because of the inability of air units to attack and their reduced scouting ability during bad weather. Interludes of bad weather are good times to resupply and rebuild units or make them overstrength while waiting for the weather to clear.
+
+(2). Tactical Overview
+
+Offensive Tactics
+How many objectives you hold at the end of the battle is the key.  Tenacity and endurance count. Avoiding
+friendly losses and inflicting losses on the enemy don't count for determining victory and defeat, although, particularly in the campaign game, both of these goals help you improve your Core army and thereby help in future battles. Since only victory objectives count, you must avoid being led astray by diversions.
+Part of staying focused on objectives is making and implementing a plan and keeping your forces organized accordingly. 
+Check the strategic map to see where victory objectives are and the best routes to them, preferably routes that pass by a number of them.  Paths that threaten multiple objectives are preferable because the enemy must build and deploy units to defend them all, thus leaving the target you wish to strike weaker before your blow. 
+Thinking in terms of battlegroups tasked with driving to specific objectives is one good way of keeping on track and avoiding time-wasting distractions.  To win in Panzer General, time is the one thing you cannot afford to waste. Offensives tend to become dissipated; they diffuse over the entire enemy front rather than just the critical sector. Units tend to wander across the battlefield in the pursuit of temporary and often irrelevant tactical advantages such as picking off weakened units.  
+The result is that a Decisive Victory can become a Marginal Victory or a loss. Attacking on a broad front is an unwise dissipation of strength except in fluid "pursuit" battles where you are chasing or racing past the enemy to your objectives. Single, narrow spearheads are too limiting, but a single, broad spearhead is an effective way to punch through strong defense lines into more favorable ground beyond, while multiple spearheads work well in intermediate situations with widely spread objectives.  Lines of advance threatening multiple objectives force the enemy to disperse to protect them all, weakening him everywhere, while converging on an objective from several directions lets you direct the most combat strength against it. 
+Force balance is essential on the offensive because of the varied nature of the terrain and enemy forces.  Any force that will attack woods or towns needs infantry..... If you have air inferiority, consider an AA unit or two and self-propelled or motorized air defense units to provide some deterrent to and protection against enemy aircraft.  This works best if you have at least a small fighter force to pick off weakened enemy aircraft after they attack.
+
+Defensive Tactics
+When you find yourself on the receiving end of a determined attack, familiarize yourself with your adversary's victory objectives and devise a plan to deny him those objectives. Build multiple lines of defense -- get antitank guns and infantry, which entrench more quickly, focusing wherever possible on defending river lines and putting infantry in cities, mountains  and forests. Artillery sited behind towns to provide defensive support is especially useful. 
+Active defense is the strongest form of defense -- it can be a very effective practice to launch local counter-attacks immediately to neutralize any enemy penetrations and before the enemy can settle into a captured position. 
+Combined arms on the defense is the converse of combined arms on the offensive - an ideal defensive position consists of infantry in bad terrain immediately supported to the rear by artillery and air defense units, with armored and infantry reserves to counterattack breakthroughs in open and close terrain, respectively, and, ideally, fighters to shoot down enemy tactical bombers and tactical bombers to weaken enemy artillery and the attacking units they support.  If you can keep your fighters in the air, they can intercept attacks on adjacent ground or bomber units (unless first attacked by the enemy themselves). If your adversary has air superiority, take recourse to air-defense units.  
+One thing to note, particularly important on defense, is that units that cannot retreat surrender instead -- if a unit is particularly likely to be beaten, try to leave room for it to fall back.  The disadvantage of this, of course, is that it makes it harder to put artillery and air defense units in direct support of the unit.
+
+The Air War
+The air war is a subsidiary but critical part of the war. Air units cannot take or hold terrain -- only land units can do that -- but they can prove a major help or hindrance depending on whose units are flying overhead.  The ideal is air supremacy which means unopposed control of the air, but your minimum goal (unless seriously inferior in the air) is air superiority, which means that you generally have the advantage in the air and can range freely over enemy lines to launch ground attacks. 
+If you achieve air supremacy, keep your air units constantly busy launching attacks on ground units to increase their experience levels. With air supremacy, your soft targets are also safe from air attack and your air force can provide valuable reconnaissance of the enemy's dispositions while he cannot see yours. 
+With air inferiority, your soft targets, especially trucks, artillery, and pioniere or engineer units, get hammered. Your fighter and anti-air units should concentrate on enemy bombers, since the fighters can do only minimal damage to your ground units. Your air defenses can provide some shelter from enemy attack for your air units. 
+Fighter/bomber coordination was a major doctrinal issue on both sides during the war in Europe. Should the fighters be tied to close escort of the bombers or range free to hunt down enemy fighters before they can approach? From the aerial defender's point of view, should his interceptors target the attacking bombers or the escorting fighters?  
+To attack escorted bombers, first attack the fighters to weaken or destroy them. If successful, this reduces the effect of, or prevents intercepting attacks on the bombers. Air defense units work the same way -- though they are best attacked by ground units, good tactical bombers and pilots can take them out or severely weaken them from the air.  Sometimes the attacker escapes without loss by shooting first to devastating effect, but considerable losses to the attacker are more typical. 
+When coordinating air units, remember to keep your tactical and level bombers adjacent to friendly fighters unless you have complete control of the air. 
+Strategic bombers can inflict prestige losses on the enemy by bombing victory objectives, destroy airfields, bomb other enemy-held cities into neutral status (i.e., 'neutralize' them so the enemy can't build there or gain prestige from holding them), or bomb units, destroying strength, ammo and fuel and suppressing them for the entire turn. 
+Highly experienced strategic bomber crews are very effective. Level bombers all have the same hard and soft attack values, so the real combat difference is revealed by other values, including their air attack and air defense values. Bombers with high naval attack values can also be extremely useful against ships.  
+
+The Naval War
+Most scenarios don't include naval warfare, but naval units can play an important role in almost all the scenarios in which they appear. They are expendable, and should be used to defeat the enemy navy and then support the ground forces with bombardment, or at least prevent the enemy fleet from bombarding your forces. Note that bombardment is much more effective against soft targets than hard targets. 
+In naval battles, since capital ships can't fight back against subs, an escort screen is essential against this threat.  
+
+
+(3). Combined Arms
+
+How To Use Combined Arms
+Combined arms coordination is represented by giving each unit a turn in which it can move and shoot, with the tactical subtlety lying in the sequence and of attacks involved in a particular local engagement.
+There are many aspects to combined arms tactics, but this is the most important: Armor is the king of open ground and infantry is the king of restricted terrain. If you consistently violate this rule, your career as an 'Panzer General' will be short and disastrous. Every unit class has its advantages and disadvantages compared to other classes. 
+Tanks can roll over infantry in the open but be stopped dead by them in bad terrain or entrenchments. Artillery can slaughter infantry but be slaughtered by tanks. Anti-tank guns can defend well against attacking armor but fare poorly against infantry. Air defense and anti-air units are poor against ground units but a Major threat to aircraft, which avoid them but can freely strike anything else moving on the ground.
+Combined arms tactics involve using a variety of unit types in close cooperation, each attacking the enemy where it has an advantage and being screened by the other arms where it has a disadvantage. On the advance in open ground, for example, tanks and tank destroyers would lead, with self-propelled artillery and air defense units and infantry mounted in half-tracks or trucks "tucked in" behind them where the enemy cannot attack them without first forcing the armor out of the way. Recon units might be in or immediately behind the front line to use their superior spotting range to scout ahead. 
+Although an army consisting solely of tanks might be able to win a battle (at least, a defensive battle), it is likely to lose badly to a balanced force of equal size. Both in the overall army and in the battlegroups assigned to spearhead particular attacks or defend particular sectors, the subtle skill of using combined arms is one of the most important talents of the Panzer General. 
+
+An Example Of A Combined Arms Attack On A Prepared Position
+To avoid ambushes and wasting time by sending troops to inappropriate locations, you begin by scouting to uncover enemy positions. This can involve sending aircraft along a path crossing over the terrain you are interested in or pushing a recon unit to the limit of what is currently visible (or one hex short of that, if you want to be careful). Absent either of these, you use a unit somewhat to the rear of your front line whose full move would take it ahead of your line but to a hex that is still visible. When it arrives there, it spots additional hexes and units from the rear can leapfrog forward, increasing the spotted area.
+Suppose the enemy is spotted, heavily entrenched in a victory objective city directly ahead of you, with artillery positioned behind the city and infantry or armor to either side. You decide you can't successfully bypass it and turn back to take it later. Your priorities are to eliminate the supporting artillery, clear away the nearby enemy units, and weaken the unit defending the city. 
+
+A typical sequence of events could be:
+1. Fighter attacks city to weaken entrenchments.
+2. Tac bomber attacks artillery to inflict losses -- getting rid of the enemy artillery is key to preventing heavy losses to your infantry.
+3. Tank attacks enemy tank/tank destroyer or tank attacks infantry on other side of city (don't attack with infantry yet since strong surviving enemy artillery will chew it up).
+4. Artillery moves into range of city and deploys.
+5. First wave infantry moves adjacent to city in front of friendly artillery.
+6. Enemy turn -- can't resupply, build, or successfully attack even your infantry because of your artillery support; can't attack  your infantry with air power since your fighter will intercept; his artillery will try to harass you, though.  
+7. Your turn: fighter over city attacks and moves to adjacent hex.
+8. If enemy tank or infantry on flanks gone, armor or tank destroyer passes forward to attack enemy artillery while tactical bomber moves over city to attack it.
+9. Friendly artillery bombards city.
+10. First assault wave attacks city, retires away if the enemy survives (bridging engineers, engineers, and pionieres are more likely to win immediately since they ignore enemy entrenchments and prevent an enemy rugged defense).
+11. Second wave moves adjacent to city, attacks and probably wins
+l2. Fresh troops from the rear occupy city.
+
+Make sure you pay attention to the estimated combat results displayed on the top center of the mainplay window as you plot your attacks, although actual combat results will vary. The only important variable the estimate leaves out is the risk of facing a rugged defense.
+
+
+

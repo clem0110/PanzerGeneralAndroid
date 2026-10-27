@@ -1,0 +1,41 @@
+.00010.00000038.
+.Anvil                    .anziow  .Ardennes                 .Market-Garden            .Market-Garden            .0013.0000.0600.0500.0000.
+.Anzio                    .berlin  .????                     .D-Day                    .????                     .0013.0000.0000.0000.0000.
+.Ardennes                 .cairow  .????                     .Berlin                   .Berlin                   .0013.0000.0600.0000.0000.
+.Balkans                  .cobraw  .Crete                    .Barbarossa               .Barbarossa               .0022.0000.0800.0600.0000.
+.Barbarossa               .tripoli .????                     .Kiev                     .????                     .0011.0000.0700.0400.0200.
+.Berlin                   .barbaros.DRAW                     .LOSS                     .LOSS                     .0012.0000.2000.1250.0500.
+.Berlin (East)            .ukraine .MWIN                     .DRAW                     .LOSS                     .0015.0000.2500.1500.0500.
+.Berlin (West)            .elaghew .MWIN                     .DRAW                     .LOSS                     .0009.0000.0500.0300.0100.
+.Budapest                 .elalmw  .????                     .????                     .????                     .0013.0000.0000.0000.0000.
+.Byelorussia              .finlandw.????                     .????                     .????                     .0014.0000.0750.0500.0250.
+.Caucasus                 .britdepw.Moscow (42)              .Kharkov                  .Kharkov                  .0011.0000.0700.0400.0200.
+.Cobra                    .germany .Ardennes                 .Market-Garden            .Market-Garden            .0016.0000.0000.0000.0000.
+.Crete                    .torchw  .Barbarossa               .Barbarossa               .Barbarossa               .0016.0000.0800.0600.0400.
+.D-Day                    .marethw .Anvil                    .Cobra                    .Cobra                    .0013.0000.0700.0500.0400.
+.Early Moscow             .karkov  .Sealion (43)             .????                     .Sevastopol               .0011.0000.4000.1000.0500.
+.El Alamein               .karkov  .Sealion (43)             .Torch                    .Torch                    .0006.0000.1500.1000.0750.
+.France                   .ukraine .????                     .????                     .LOSS                     .0012.0000.2000.1250.1000.
+.Husky                    .edeploy .????                     .Anzio                    .Anzio                    .0009.0000.1500.0750.0500.
+.Kharkov                  .stalingw.Moscow (43)              .Kursk                    .Byelorussia              .0007.0000.1000.0500.0250.
+.Kiev                     .marethw .Moscow (41)              .Moscow (41)              .Sevastopol               .0010.0000.0800.0500.0300.
+.Kursk                    .elalmw  .Moscow (43)              .????                     .Byelorussia              .0009.0000.0700.0300.0200.
+.Low Countries            .germany .France                   .France                   .France                   .0015.0000.0600.0500.0000.
+.Market-Garden            .karkov  .Ardennes                 .Ardennes                 .????                     .0010.0000.2000.1250.0500.
+.Middle East              .ukraine .????                     .Caucasus                 .El Alamein               .0011.0000.1000.0500.0000.
+.Moscow (41)              .anziow  .Sealion (43)             .????                     .Sevastopol               .0016.0000.0600.0500.0000.
+.Moscow (42)              .d-dayw  .Sealion (43)             .Kharkov                  .Kharkov                  .0025.0000.0800.0600.0000.
+.Moscow (43)              .edeploy .D-Day                    .????                     .Byelorussia              .0012.0000.1500.0750.0500.
+.North Africa             .barbaros.Middle East              .????                     .Torch                    .0010.0000.1500.0750.0500.
+.Norway                   .ukraine .Low Countries            .Low Countries            .Low Countries            .0016.0000.1500.0750.0250.
+.Poland                   .germany .Warsaw                   .Warsaw                   .LOSS                     .0014.0000.0600.0500.0000.
+.Sealion (40)             .sciliyw .Barbarossa               .????                     .LOSS                     .0015.0000.0600.0500.0400.
+.Sealion (43)             .sidibran.????                     .Moscow (43)              .Anzio                    .0007.0000.0300.0200.0100.
+.Sealion Plus             .stalingw.Barbarossa               .????                     .LOSS                     .0016.0000.1500.0750.0000.
+.Sevastopol               .rhinep  .Stalingrad               .Stalingrad               .????                     .0012.0000.0600.0500.0000.
+.Stalingrad               .stalingw.Moscow (42)              .????                     .Kharkov                  .0010.0000.0000.0000.0000.
+.Torch                    .torchw  .????                     .Husky                    .Husky                    .0007.0000.0800.0600.0500.
+.Warsaw                   .tripoli .Norway                   .Low Countries            .LOSS                     .0012.0000.0000.0000.0300.
+.Washington               .britdepw.DWIN                     .MWIN                     .LOSS                     .0014.0000.0600.0500.0000.
+.Scenario Name------------.painting.decisive Scenario Name---.marginal Scenario Name---.loss     Scenario Name---.wcnt.timo.dvps.mvps.lspr.
+
