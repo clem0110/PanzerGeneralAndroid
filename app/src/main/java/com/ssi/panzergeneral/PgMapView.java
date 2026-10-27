@@ -276,6 +276,9 @@ public class PgMapView extends View {
         selectedUnit = null;
         reachableHexes.clear();
         validTargets.clear();
+        if (listener != null && engine != null && engine.scenario != null) {
+            listener.onHexSelected(-1, -1, null, null);
+        }
         invalidate();
     }
 
@@ -412,16 +415,21 @@ public class PgMapView extends View {
             }
         }
 
-        // 3. Otherwise select unit or inspect hex at (col, row)
+        // 3. If clicking a unit or hex that is already selected, remove the selection
+        if ((selectedUnit != null && selectedUnit.col == col && selectedUnit.row == row)
+                || (selectedUnit == null && selectedCol == col && selectedRow == row)) {
+            sounds.playClick();
+            clearSelection();
+            return;
+        }
+
+        // 4. Otherwise select unit or inspect hex at (col, row)
         PgDatabase.ActiveUnit tappedUnit = engine.getTopUnitAt(col, row, airModePreferred);
         if (tappedUnit != null) {
             PgDatabase.ActiveUnit alt = engine.getUnitAt(col, row, !engine.isUnitOnAirLayer(tappedUnit));
             if (alt != null) {
                 // If one unit belongs to the player (Axis) and the other is enemy, prioritize selecting player's unit
                 if (!tappedUnit.isAxis && alt.isAxis) {
-                    tappedUnit = alt;
-                } else if (col == selectedCol && row == selectedRow) {
-                    // Tapping same hex toggles between air and ground unit if both exist
                     tappedUnit = alt;
                 }
             }
