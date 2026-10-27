@@ -476,6 +476,8 @@ public class PgGameEngine {
 
     public int getMaxMovementPoints(PgDatabase.ActiveUnit u) {
         if (u == null || u.strength <= 0) return 0;
+        PgDatabase.UnitDef baseDef = db.equipment.get(u.unitDefId);
+        if (baseDef.isFortification()) return 0;
         if (u.inAirTransport) {
             return Math.max(10, getAirTransportDef().movement);
         }
@@ -486,12 +488,13 @@ public class PgGameEngine {
             PgDatabase.UnitDef trp = db.equipment.get(u.transportDefId);
             return trp.movement;
         }
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-        return def.movement;
+        return baseDef.movement;
     }
 
     public int getRemainingMovementPoints(PgDatabase.ActiveUnit u) {
         if (u == null || u.moved || u.strength <= 0) return 0;
+        PgDatabase.UnitDef baseDef = db.equipment.get(u.unitDefId);
+        if (baseDef.isFortification()) return 0;
         PgDatabase.UnitDef effDef = getEffectiveUnitDef(u);
         int remMove = Math.max(0, getMaxMovementPoints(u) - u.movePointsUsed);
         if (supplyEnabled && effDef != null && effDef.maxFuel > 0 && !u.inAirTransport && !u.inSeaTransport) {
@@ -503,6 +506,8 @@ public class PgGameEngine {
     public Map<Integer, Integer> getReachableHexes(PgDatabase.ActiveUnit u) {
         Map<Integer, Integer> distMap = new HashMap<>();
         if (u == null || u.moved || u.strength <= 0) return distMap;
+        PgDatabase.UnitDef baseDef = db.equipment.get(u.unitDefId);
+        if (baseDef.isFortification()) return distMap;
         PgDatabase.UnitDef def = getEffectiveUnitDef(u);
         int maxMove = getRemainingMovementPoints(u);
         if (maxMove <= 0) return distMap;
@@ -619,6 +624,7 @@ public class PgGameEngine {
     }
 
     private int getUnitStepMoveCost(PgDatabase.ActiveUnit u, PgDatabase.UnitDef def, PgDatabase.HexCell cell) {
+        if (def.isFortification()) return 99;
         if (u.inAirTransport || def.isAir()) return 1;
         if (u.inSeaTransport) {
             if (cell.isWater() || cell.isPort()) return 1;
@@ -783,6 +789,9 @@ public class PgGameEngine {
     }
 
     public boolean moveUnit(PgDatabase.ActiveUnit u, int destCol, int destRow) {
+        if (u == null) return false;
+        PgDatabase.UnitDef baseDef = db.equipment.get(u.unitDefId);
+        if (baseDef.isFortification()) return false;
         lastSurpriseReport = null;
         Map<Integer, Integer> reach = getReachableHexes(u);
         int key = destRow * scenario.cols + destCol;
@@ -1462,27 +1471,33 @@ public class PgGameEngine {
                 attacker.row = defOrigRow;
                 onHexCaptured(defOrigCol, defOrigRow, attacker);
             }
+        } else if (dDef.isFortification() && (defender.getEffectiveStrength() == 0 || defender.suppression >= defender.strength || (dist == 1 && defLoss >= 3 && defLoss > atkLoss))) {
+            // Bunkers, forts, and fortifications cannot move or retreat:
+            // When fully suppressed after an attack or forced to retreat, the garrison surrenders!
+            rep.defenderSurrendered = true;
+            rep.defenderDestroyed = true;
+            rep.defenderLosses = rep.defenderStartStr;
+            defender.strength = 0;
+            units.remove(defender);
+            if (attacker.isAxis) axisPrestige += fullReward;
+            else alliedPrestige += fullReward;
+
+            // Ground close assault captures the fortification hex
+            if (dist == 1 && !aDef.isAir() && !rep.attackerDestroyed
+                    && getTerrainMoveCost(aDef, scenario.grid[defOrigCol][defOrigRow], false) < 99) {
+                attacker.col = defOrigCol;
+                attacker.row = defOrigRow;
+                onHexCaptured(defOrigCol, defOrigRow, attacker);
+            }
         } else if (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender)
                 && (defLoss >= 3 && defLoss > atkLoss || defender.getEffectiveStrength() == 0)) {
             // Defender is forced to retreat
             boolean foundRetreat = false;
-            for (int[] nb : getNeighbors(defender.col, defender.row)) {
-                if (hexDistance(attacker.col, attacker.row, nb[0], nb[1]) > 1
-                        && getUnitAt(nb[0], nb[1], false) == null
-                        && !isInEnemyZoc(nb[0], nb[1], defender)
-                        && getUnitStepMoveCost(defender, dDef, scenario.grid[nb[0]][nb[1]]) < 99) {
-                    defender.col = nb[0];
-                    defender.row = nb[1];
-                    defender.entrenchment = 0;
-                    rep.defenderRetreated = true;
-                    foundRetreat = true;
-                    break;
-                }
-            }
-            if (!foundRetreat) {
+            if (!dDef.isFortification()) {
                 for (int[] nb : getNeighbors(defender.col, defender.row)) {
                     if (hexDistance(attacker.col, attacker.row, nb[0], nb[1]) > 1
                             && getUnitAt(nb[0], nb[1], false) == null
+                            && !isInEnemyZoc(nb[0], nb[1], defender)
                             && getUnitStepMoveCost(defender, dDef, scenario.grid[nb[0]][nb[1]]) < 99) {
                         defender.col = nb[0];
                         defender.row = nb[1];
@@ -1490,6 +1505,20 @@ public class PgGameEngine {
                         rep.defenderRetreated = true;
                         foundRetreat = true;
                         break;
+                    }
+                }
+                if (!foundRetreat) {
+                    for (int[] nb : getNeighbors(defender.col, defender.row)) {
+                        if (hexDistance(attacker.col, attacker.row, nb[0], nb[1]) > 1
+                                && getUnitAt(nb[0], nb[1], false) == null
+                                && getUnitStepMoveCost(defender, dDef, scenario.grid[nb[0]][nb[1]]) < 99) {
+                            defender.col = nb[0];
+                            defender.row = nb[1];
+                            defender.entrenchment = 0;
+                            rep.defenderRetreated = true;
+                            foundRetreat = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -1644,10 +1673,11 @@ public class PgGameEngine {
         if (u == null || !u.isAxis || !isPlayerTurn || u.moved || u.movePointsUsed > 0 || u.attacked || u.strength <= 0) {
             return false;
         }
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def.isFortification()) return false;
         if (u.inAirTransport || u.inSeaTransport) return false;
         if (isInEnemyZoc(u.col, u.row, u)) return false;
         PgDatabase.HexCell cell = scenario.grid[u.col][u.row];
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def.isAir()) {
             return cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, scenario);
         }
@@ -1680,7 +1710,9 @@ public class PgGameEngine {
 
     // Panzer General Manual: Disband Unit to recover Prestige
     public boolean canDisbandUnit(PgDatabase.ActiveUnit u) {
-        return u != null && u.isAxis && isPlayerTurn && !u.moved && u.movePointsUsed == 0 && !u.attacked && u.strength > 0;
+        if (u == null || !u.isAxis || !isPlayerTurn || u.moved || u.movePointsUsed == 0 || !u.attacked || u.strength <= 0) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        return !def.isFortification();
     }
 
     public int getDisbandRefund(PgDatabase.ActiveUnit u) {
@@ -1707,10 +1739,11 @@ public class PgGameEngine {
     // Panzer General Manual: Embark / Disembark Air Transport (Paratroops), Sea Transport (Ports), and Organic Transport
     public String getTransportActionLabel(PgDatabase.ActiveUnit u) {
         if (u == null || !u.isAxis) return "MOUNT";
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def.isFortification()) return "IMMOBILE";
         if (u.inAirTransport) return "PARADROP";
         if (u.inSeaTransport) return "DISEMBARK";
         PgDatabase.HexCell cell = scenario.grid[u.col][u.row];
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (!def.isAir() && !def.isNaval() && !u.moved && u.movePointsUsed == 0 && !u.attacked) {
             if (cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, scenario)
                     && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
@@ -1727,6 +1760,7 @@ public class PgGameEngine {
     public boolean canUseTransportAction(PgDatabase.ActiveUnit u) {
         if (u == null || !u.isAxis || !isPlayerTurn || u.strength <= 0) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def.isFortification()) return false;
         PgDatabase.HexCell cell = scenario.grid[u.col][u.row];
         if (u.inAirTransport) {
             return getUnitAt(u.col, u.row, false) == null && getTerrainMoveCost(def, cell, false) < 99;

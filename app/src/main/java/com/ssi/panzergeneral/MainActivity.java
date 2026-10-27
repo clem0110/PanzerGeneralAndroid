@@ -705,7 +705,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
         for (int i = 0; i < engine.units.size(); i++) {
             PgDatabase.ActiveUnit u = engine.units.get((startIdx + i) % engine.units.size());
-            if (u.isAxis && u.strength > 0 && (!u.moved || !u.attacked)) {
+            if (u.isAxis && u.strength > 0) {
+                PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+                if (def.isFortification()) {
+                    if (u.attacked || engine.getValidTargets(u).isEmpty()) continue;
+                } else if (u.moved && u.attacked) {
+                    continue;
+                }
                 mapView.centerOnHex(u.col, u.row);
                 mapView.selectUnit(u);
                 refreshHud();

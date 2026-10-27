@@ -112,6 +112,13 @@ public class PgDatabase {
             String n = name.toLowerCase(Locale.ROOT);
             return n.contains("fallschirm") || n.contains("para") || n.contains("airborne");
         }
+
+        public boolean isFortification() {
+            if (unitClass == CLASS_FORT) return true;
+            if (name == null) return false;
+            String n = name.toLowerCase(Locale.ROOT);
+            return n.contains("fort") || n.contains("bunker") || n.contains("strongpoint");
+        }
     }
 
     @Data
