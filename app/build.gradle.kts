@@ -23,3 +23,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    compileOnly("org.projectlombok:lombok:1.18.36")
+    annotationProcessor("org.projectlombok:lombok:1.18.36")
+    compileOnly(fileTree("libs") { include("*.jar") })
+    annotationProcessor(fileTree("libs") { include("*.jar") })
+}

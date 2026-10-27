@@ -3,8 +3,13 @@ package com.ssi.panzergeneral;
 import android.content.Context;
 import java.io.*;
 import java.util.*;
+import lombok.*;
 
 public class PgGameEngine {
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CombatPrediction implements Serializable {
         public int expectedAttackerLosses;
         public int expectedDefenderLosses;
@@ -16,6 +21,10 @@ public class PgGameEngine {
         public String summary;
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CombatReport implements Serializable {
         public String attackerName;
         public String defenderName;
@@ -40,6 +49,10 @@ public class PgGameEngine {
         public int targetCol, targetRow;
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class UndoMoveState {
         public PgDatabase.ActiveUnit unit;
         public int prevCol;
@@ -55,6 +68,10 @@ public class PgGameEngine {
         public int prevAxisPrestige;
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class SaveState implements Serializable {
         public boolean isCampaign;
         public int campaignEntryIndex;
@@ -66,11 +83,17 @@ public class PgGameEngine {
         public int wetness;
         public int axisPrestige;
         public int alliedPrestige;
+        @Builder.Default
         public boolean supplyEnabled = true;
+        @Builder.Default
         public boolean weatherEnabled = true;
+        @Builder.Default
         public boolean fogOfWarEnabled = true;
+        @Builder.Default
         public int prestigeModifier = 100; // 50%, 75%, 100%, 150%, 200%
+        @Builder.Default
         public List<PgDatabase.ActiveUnit> units = new ArrayList<>();
+        @Builder.Default
         public List<PgDatabase.ActiveUnit> coreRoster = new ArrayList<>();
         public int[][] hexOwners;
         public boolean[][] fogVisible;
@@ -745,19 +768,20 @@ public class PgGameEngine {
 
         Set<Integer> prevSpotted = getSpottedEnemyIds();
 
-        UndoMoveState undo = new UndoMoveState();
-        undo.unit = u;
-        undo.prevCol = u.col;
-        undo.prevRow = u.row;
-        undo.prevFuel = u.fuel;
-        undo.prevMovePointsUsed = u.movePointsUsed;
-        undo.prevMoved = u.moved;
-        undo.prevEntrenchment = u.entrenchment;
-        undo.prevFacingLeft = u.facingLeft;
-        undo.destCol = destCol;
-        undo.destRow = destRow;
-        undo.prevDestOwnerNation = scenario.grid[destCol][destRow].ownerNation;
-        undo.prevAxisPrestige = axisPrestige;
+        UndoMoveState undo = UndoMoveState.builder()
+                .unit(u)
+                .prevCol(u.col)
+                .prevRow(u.row)
+                .prevFuel(u.fuel)
+                .prevMovePointsUsed(u.movePointsUsed)
+                .prevMoved(u.moved)
+                .prevEntrenchment(u.entrenchment)
+                .prevFacingLeft(u.facingLeft)
+                .destCol(destCol)
+                .destRow(destRow)
+                .prevDestOwnerNation(scenario.grid[destCol][destRow].ownerNation)
+                .prevAxisPrestige(axisPrestige)
+                .build();
 
         boolean wasSeaTransport = u.inSeaTransport;
         PgDatabase.HexCell destCell = scenario.grid[destCol][destRow];
@@ -1049,7 +1073,6 @@ public class PgGameEngine {
     }
 
     public CombatPrediction predictCombat(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
-        CombatPrediction pred = new CombatPrediction();
         PgDatabase.UnitDef aDef = attacker.inAirTransport ? getAirTransportDef()
                 : (attacker.inSeaTransport ? getSeaTransportDef(attacker.isAxis) : db.equipment.get(attacker.unitDefId));
         PgDatabase.UnitDef dDef = defender.inAirTransport ? getAirTransportDef()
@@ -1057,7 +1080,7 @@ public class PgGameEngine {
         int dist = hexDistance(attacker.col, attacker.row, defender.col, defender.row);
 
         boolean isGroundClose = (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender));
-        pred.ruggedDefenseChance = (isGroundClose && defender.entrenchment >= 1 && !aDef.isPioneerOrEngineer());
+        boolean ruggedDefenseChance = (isGroundClose && defender.entrenchment >= 1 && !aDef.isPioneerOrEngineer());
 
         int atkAttackGrade = getStrategyGuideAttackGrade(attacker, aDef, defender, dDef, dist, false);
         int defDefenseGrade = getStrategyGuideDefenseGrade(attacker, aDef, defender, dDef, dist, false);
@@ -1087,8 +1110,6 @@ public class PgGameEngine {
             if (aDef.unitClass == PgDatabase.CLASS_INFANTRY) aIni += 2;
             if (dDef.unitClass == PgDatabase.CLASS_INFANTRY) dIni += 2;
         }
-        pred.effectiveAttackerIni = aIni;
-        pred.effectiveDefenderIni = dIni;
 
         boolean aBomb = isBombardment(aDef, dist);
         boolean dBomb = isBombardment(dDef, dist);
@@ -1123,16 +1144,26 @@ public class PgGameEngine {
             }
         }
 
-        pred.expectedDefenderLosses = (int) Math.round(expDefLosses);
-        pred.expectedAttackerLosses = (int) Math.round(expAtkLosses);
-        pred.artillerySupport = (findDefensiveSupport(attacker, defender) != null);
-        pred.fighterInterceptor = (findAirInterceptorOrFlak(attacker, defender) != null);
-        pred.summary = String.format(Locale.ROOT, "Expected: Atk -%d vs Def -%d (Ini %d:%d)%s%s",
-                pred.expectedAttackerLosses, pred.expectedDefenderLosses,
+        int expectedDefenderLosses = (int) Math.round(expDefLosses);
+        int expectedAttackerLosses = (int) Math.round(expAtkLosses);
+        boolean artillerySupport = (findDefensiveSupport(attacker, defender) != null);
+        boolean fighterInterceptor = (findAirInterceptorOrFlak(attacker, defender) != null);
+        String summary = String.format(Locale.ROOT, "Expected: Atk -%d vs Def -%d (Ini %d:%d)%s%s",
+                expectedAttackerLosses, expectedDefenderLosses,
                 aIni, dIni,
-                pred.ruggedDefenseChance ? " [Rugged Def Risk]" : "",
-                pred.fighterInterceptor ? " [Interceptor]" : (pred.artillerySupport ? " [Artillery Sup]" : ""));
-        return pred;
+                ruggedDefenseChance ? " [Rugged Def Risk]" : "",
+                fighterInterceptor ? " [Interceptor]" : (artillerySupport ? " [Artillery Sup]" : ""));
+
+        return CombatPrediction.builder()
+                .effectiveAttackerIni(aIni)
+                .effectiveDefenderIni(dIni)
+                .ruggedDefenseChance(ruggedDefenseChance)
+                .expectedDefenderLosses(expectedDefenderLosses)
+                .expectedAttackerLosses(expectedAttackerLosses)
+                .artillerySupport(artillerySupport)
+                .fighterInterceptor(fighterInterceptor)
+                .summary(summary)
+                .build();
     }
 
     public CombatReport executeCombat(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
@@ -1141,20 +1172,21 @@ public class PgGameEngine {
     }
 
     private CombatReport executeCombatInternal(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, boolean surpriseAmbush) {
-        CombatReport rep = new CombatReport();
         PgDatabase.UnitDef aDef = db.equipment.get(attacker.unitDefId);
         PgDatabase.UnitDef dDef = db.equipment.get(defender.unitDefId);
-        rep.attackerName = aDef.name;
-        rep.defenderName = dDef.name;
-        rep.attackerId = attacker.instanceId;
-        rep.defenderId = defender.instanceId;
-        rep.attackerIconId = getEffectiveIconId(attacker);
-        rep.defenderIconId = getEffectiveIconId(defender);
-        rep.attackerStartStr = attacker.strength;
-        rep.defenderStartStr = defender.strength;
-        rep.targetCol = defender.col;
-        rep.targetRow = defender.row;
-        rep.surpriseContact = surpriseAmbush;
+        CombatReport rep = CombatReport.builder()
+                .attackerName(aDef.name)
+                .defenderName(dDef.name)
+                .attackerId(attacker.instanceId)
+                .defenderId(defender.instanceId)
+                .attackerIconId(getEffectiveIconId(attacker))
+                .defenderIconId(getEffectiveIconId(defender))
+                .attackerStartStr(attacker.strength)
+                .defenderStartStr(defender.strength)
+                .targetCol(defender.col)
+                .targetRow(defender.row)
+                .surpriseContact(surpriseAmbush)
+                .build();
 
         if (defender.col < attacker.col) {
             attacker.facingLeft = true;
@@ -1744,25 +1776,27 @@ public class PgGameEngine {
         if (getUnitAt(col, row, def.isAir()) != null) return null;
 
         axisPrestige -= totalCost;
-        PgDatabase.ActiveUnit u = new PgDatabase.ActiveUnit();
-        u.instanceId = nextInstanceId++;
-        u.unitDefId = unitDefId;
-        u.transportDefId = transportDefId;
-        u.nation = scenario.axisNations[0] > 0 ? scenario.axisNations[0] : 8;
-        u.isAxis = true;
-        u.isCore = true;
-        u.col = col;
-        u.row = row;
-        u.strength = 10;
-        u.entrenchment = 0;
-        u.experience = 100;
-        u.fuel = def.maxFuel > 0 ? def.maxFuel : 99;
-        u.ammo = def.maxAmmo > 0 ? def.maxAmmo : 99;
-        u.movePointsUsed = 0;
-        u.moved = false;
-        u.attacked = false;
-        u.facingLeft = false;
-        u.customTitle = u.instanceId + ". " + def.name;
+        int curId = nextInstanceId++;
+        PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
+                .instanceId(curId)
+                .unitDefId(unitDefId)
+                .transportDefId(transportDefId)
+                .nation(scenario.axisNations[0] > 0 ? scenario.axisNations[0] : 8)
+                .isAxis(true)
+                .isCore(true)
+                .col(col)
+                .row(row)
+                .strength(10)
+                .entrenchment(0)
+                .experience(100)
+                .fuel(def.maxFuel > 0 ? def.maxFuel : 99)
+                .ammo(def.maxAmmo > 0 ? def.maxAmmo : 99)
+                .movePointsUsed(0)
+                .moved(false)
+                .attacked(false)
+                .facingLeft(false)
+                .customTitle(curId + ". " + def.name)
+                .build();
         units.add(u);
         if (isCampaignMode) coreUnits.add(u);
         lastUndoState = null;
@@ -2014,31 +2048,35 @@ public class PgGameEngine {
     }
 
     public void saveGame(Context ctx, int slot) throws IOException {
-        SaveState st = new SaveState();
-        st.isCampaign = isCampaignMode;
-        st.campaignEntryIndex = campaignIndex;
-        st.currentScenarioNumber = currentScenarioNumber;
-        st.turn = turn;
-        st.maxTurns = maxTurns;
-        st.weather = weather;
-        st.groundCondition = groundCondition;
-        st.wetness = wetness;
-        st.axisPrestige = axisPrestige;
-        st.alliedPrestige = alliedPrestige;
-        st.supplyEnabled = supplyEnabled;
-        st.weatherEnabled = weatherEnabled;
-        st.fogOfWarEnabled = fogOfWarEnabled;
-        st.prestigeModifier = prestigeModifier;
-        st.units = new ArrayList<>(units);
-        st.coreRoster = new ArrayList<>(coreUnits);
-        st.hexOwners = new int[scenario.cols][scenario.rows];
+        int[][] hexOwners = new int[scenario.cols][scenario.rows];
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
-                st.hexOwners[c][r] = scenario.grid[c][r].ownerNation;
+                hexOwners[c][r] = scenario.grid[c][r].ownerNation;
             }
         }
-        st.scenarioTitle = scenario.meta.fullTitle;
-        st.saveTimestamp = new java.text.SimpleDateFormat("MMM dd HH:mm", Locale.US).format(new Date());
+        String saveTimestamp = new java.text.SimpleDateFormat("MMM dd HH:mm", Locale.US).format(new Date());
+
+        SaveState st = SaveState.builder()
+                .isCampaign(isCampaignMode)
+                .campaignEntryIndex(campaignIndex)
+                .currentScenarioNumber(currentScenarioNumber)
+                .turn(turn)
+                .maxTurns(maxTurns)
+                .weather(weather)
+                .groundCondition(groundCondition)
+                .wetness(wetness)
+                .axisPrestige(axisPrestige)
+                .alliedPrestige(alliedPrestige)
+                .supplyEnabled(supplyEnabled)
+                .weatherEnabled(weatherEnabled)
+                .fogOfWarEnabled(fogOfWarEnabled)
+                .prestigeModifier(prestigeModifier)
+                .units(new ArrayList<>(units))
+                .coreRoster(new ArrayList<>(coreUnits))
+                .hexOwners(hexOwners)
+                .scenarioTitle(scenario.meta.fullTitle)
+                .saveTimestamp(saveTimestamp)
+                .build();
 
         File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
         try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(f))) {

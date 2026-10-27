@@ -7,12 +7,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import lombok.*;
 
 public class PgAssetManager {
     private final AssetManager assets;
     private final int[] defaultPalette = new int[256];
     private final Map<String, ShpArchive> shpCache = new HashMap<>();
 
+    @Getter
+    @ToString(exclude = {"bitmaps", "flippedBitmaps"})
     public static class ShpArchive {
         public final byte[] data;
         public final int count;
@@ -21,6 +24,7 @@ public class PgAssetManager {
         private final Bitmap[] bitmaps;
         private final Bitmap[] flippedBitmaps;
 
+        @Builder
         public ShpArchive(byte[] data, int count, int[] spriteOffsets, int[] paletteOffsets) {
             this.data = data;
             this.count = count;
@@ -86,7 +90,12 @@ public class PgAssetManager {
                 sprOff[i] = bb.getInt(8 + i * 8);
                 palOff[i] = bb.getInt(12 + i * 8);
             }
-            arch = new ShpArchive(data, count, sprOff, palOff);
+            arch = ShpArchive.builder()
+                    .data(data)
+                    .count(count)
+                    .spriteOffsets(sprOff)
+                    .paletteOffsets(palOff)
+                    .build();
             shpCache.put(key, arch);
             return arch;
         } catch (Exception e) {

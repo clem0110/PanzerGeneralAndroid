@@ -2,9 +2,13 @@ $ErrorActionPreference = "Stop"
 
 $projDir = $PSScriptRoot
 $jbrBin = "$env:USERPROFILE\AppData\Local\Programs\Android Studio\jbr\bin"
+if (Test-Path "C:\Users\clem0\.jdks\openjdk-23.0.2\bin\javac.exe") {
+    $jbrBin = "C:\Users\clem0\.jdks\openjdk-23.0.2\bin"
+}
 $sdkDir = "$env:LOCALAPPDATA\Android\Sdk"
 $buildTools = "$sdkDir\build-tools\36.0.0"
 $androidJar = "$sdkDir\platforms\android-37.0\android.jar"
+$lombokJar = "$projDir\app\libs\lombok.jar"
 
 $buildDir = "$projDir\app\build\manual"
 if (Test-Path $buildDir) { Remove-Item -Recurse -Force $buildDir }
@@ -24,11 +28,11 @@ Write-Host "2. Linking resources..."
     -o "$buildDir\unaligned.apk" `
     "$buildDir\resources.zip"
 
-Write-Host "3. Compiling Java sources with javac..."
+Write-Host "3. Compiling Java sources with javac (Java 21 + Lombok)..."
 $javaFiles = @()
 $javaFiles += Get-ChildItem -Recurse "$projDir\app\src\main\java" -Filter "*.java" | ForEach-Object { $_.FullName }
 $javaFiles += Get-ChildItem -Recurse "$buildDir\gen" -Filter "*.java" | ForEach-Object { $_.FullName }
-& "$jbrBin\javac.exe" --release 17 -cp "$androidJar" -d "$buildDir\classes" $javaFiles
+& "$jbrBin\javac.exe" --release 21 -cp "$androidJar;$lombokJar" -processorpath "$lombokJar" -d "$buildDir\classes" $javaFiles
 
 Write-Host "4. Converting bytecode to DEX with d8..."
 $classFiles = Get-ChildItem -Recurse "$buildDir\classes" -Filter "*.class" | ForEach-Object { $_.FullName }

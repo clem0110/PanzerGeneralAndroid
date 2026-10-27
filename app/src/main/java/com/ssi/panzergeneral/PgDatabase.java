@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import lombok.*;
 
 public class PgDatabase {
     public static final int CLASS_INFANTRY = 0;
@@ -39,6 +40,10 @@ public class PgDatabase {
     public static final int TARGET_AIR = 2;
     public static final int TARGET_NAVAL = 3;
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class UnitDef implements Serializable {
         public int id;
         public String name;
@@ -64,6 +69,7 @@ public class PgDatabase {
         public int startYear;
         public int endYear;
         public int nationMask;
+        @Builder.Default
         public int entrenchmentRate = 1;
 
         public boolean isAir() {
@@ -108,6 +114,10 @@ public class PgDatabase {
         }
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ScenarioMeta implements Serializable {
         public int number; // 1..38
         public String shortTitle;
@@ -127,6 +137,10 @@ public class PgDatabase {
         public int prestigeLoss;
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class HexCell implements Serializable {
         public int col;
         public int row;
@@ -141,6 +155,10 @@ public class PgDatabase {
         public boolean isDeployHex;
 
         public String getTerrainName() {
+            return getTerrainName(terrainType);
+        }
+
+        public static String getTerrainName(int terrainType) {
             switch (terrainType) {
                 case 0: return "Clear";
                 case 1: return "Coast";
@@ -201,6 +219,10 @@ public class PgDatabase {
         }
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ActiveUnit implements Serializable {
         public int instanceId;
         public int unitDefId;
@@ -239,6 +261,10 @@ public class PgDatabase {
         }
     }
 
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ScenarioData implements Serializable {
         public ScenarioMeta meta;
         public int cols;
@@ -247,9 +273,13 @@ public class PgDatabase {
         public int axisNations[];
         public int alliedNations[];
         public HexCell[][] grid;
+        @Builder.Default
         public List<int[]> objectives = new ArrayList<>();
+        @Builder.Default
         public List<int[]> deployHexes = new ArrayList<>();
+        @Builder.Default
         public List<ActiveUnit> initialUnits = new ArrayList<>();
+        @Builder.Default
         public boolean isDefensiveScenario = false;
     }
 
@@ -272,38 +302,44 @@ public class PgDatabase {
             int count = Short.toUnsignedInt(bb.getShort(0));
             for (int i = 0; i < count && 2 + (i + 1) * 50 <= data.length; i++) {
                 int off = 2 + i * 50;
-                UnitDef u = new UnitDef();
-                u.id = i;
                 int nEnd = off;
                 while (nEnd < off + 20 && data[nEnd] != 0) nEnd++;
-                u.name = new String(data, off, nEnd - off, StandardCharsets.US_ASCII).trim();
-                u.unitClass = data[off + 20] & 0xFF;
-                u.softAttack = data[off + 21] & 0xFF;
-                u.hardAttack = data[off + 22] & 0xFF;
-                u.airAttack = data[off + 23] & 0xFF;
-                u.navalAttack = data[off + 24] & 0xFF;
-                u.groundDefense = data[off + 25] & 0xFF;
-                u.airDefense = data[off + 26] & 0xFF;
-                u.closeDefense = data[off + 27] & 0xFF;
-                u.targetType = data[off + 28] & 0xFF;
-                u.initiative = data[off + 31] & 0xFF;
-                u.range = data[off + 32] & 0xFF;
-                u.spotting = Math.max(1, data[off + 33] & 0xFF);
-                u.moveType = data[off + 35] & 0xFF;
-                u.movement = data[off + 36] & 0xFF;
-                u.maxFuel = data[off + 37] & 0xFF;
-                u.maxAmmo = data[off + 38] & 0xFF;
-                u.cost = (data[off + 41] & 0xFF) * 12;
-                if (u.cost == 0) u.cost = 120;
-                u.iconId = Short.toUnsignedInt(bb.getShort(off + 42));
-                u.startMonth = data[off + 46] & 0xFF;
-                u.startYear = data[off + 47] & 0xFF;
-                u.endYear = data[off + 48] & 0xFF;
-                u.nationMask = data[off + 49] & 0xFF;
-                if (u.isPioneerOrEngineer()) u.entrenchmentRate = 3;
-                else if (u.unitClass == CLASS_INFANTRY) u.entrenchmentRate = 2;
-                else if (u.unitClass == CLASS_ANTI_TANK || u.unitClass == CLASS_ARTILLERY || u.unitClass == CLASS_AIR_DEFENSE) u.entrenchmentRate = 1;
-                else u.entrenchmentRate = 0;
+                String name = new String(data, off, nEnd - off, StandardCharsets.US_ASCII).trim();
+                int unitClass = data[off + 20] & 0xFF;
+                int cost = (data[off + 41] & 0xFF) * 12;
+                if (cost == 0) cost = 120;
+                String nameLower = name.toLowerCase(Locale.ROOT);
+                boolean isPio = i == 330 || nameLower.contains("bridge") || nameLower.contains("brucken")
+                        || nameLower.contains("pionier") || nameLower.contains("engineer") || nameLower.contains("pio");
+                int entRate = isPio ? 3 : (unitClass == CLASS_INFANTRY ? 2 : ((unitClass == CLASS_ANTI_TANK || unitClass == CLASS_ARTILLERY || unitClass == CLASS_AIR_DEFENSE) ? 1 : 0));
+
+                UnitDef u = UnitDef.builder()
+                        .id(i)
+                        .name(name)
+                        .unitClass(unitClass)
+                        .softAttack(data[off + 21] & 0xFF)
+                        .hardAttack(data[off + 22] & 0xFF)
+                        .airAttack(data[off + 23] & 0xFF)
+                        .navalAttack(data[off + 24] & 0xFF)
+                        .groundDefense(data[off + 25] & 0xFF)
+                        .airDefense(data[off + 26] & 0xFF)
+                        .closeDefense(data[off + 27] & 0xFF)
+                        .targetType(data[off + 28] & 0xFF)
+                        .initiative(data[off + 31] & 0xFF)
+                        .range(data[off + 32] & 0xFF)
+                        .spotting(Math.max(1, data[off + 33] & 0xFF))
+                        .moveType(data[off + 35] & 0xFF)
+                        .movement(data[off + 36] & 0xFF)
+                        .maxFuel(data[off + 37] & 0xFF)
+                        .maxAmmo(data[off + 38] & 0xFF)
+                        .cost(cost)
+                        .iconId(Short.toUnsignedInt(bb.getShort(off + 42)))
+                        .startMonth(data[off + 46] & 0xFF)
+                        .startYear(data[off + 47] & 0xFF)
+                        .endYear(data[off + 48] & 0xFF)
+                        .nationMask(data[off + 49] & 0xFF)
+                        .entrenchmentRate(entRate)
+                        .build();
                 equipment.add(u);
             }
         } catch (IOException ignored) {
@@ -353,65 +389,84 @@ public class PgDatabase {
         try {
             byte[] stat = assetManager.readAssetBytes("dat/SCENSTAT.BIN");
             for (int s = 1; s <= 38; s++) {
-                ScenarioMeta m = new ScenarioMeta();
-                m.number = s;
                 int nameOff = 40 + (s - 1) * 14;
                 int nEnd = nameOff;
                 while (nEnd < nameOff + 14 && stat[nEnd] != 0) nEnd++;
-                m.shortTitle = new String(stat, nameOff, nEnd - nameOff, StandardCharsets.US_ASCII).trim();
-                m.fullTitle = m.shortTitle;
+                String shortTitle = new String(stat, nameOff, nEnd - nameOff, StandardCharsets.US_ASCII).trim();
+                String fullTitle = shortTitle;
 
                 int descOff = 600 + (s - 1) * 160;
                 int dEnd = descOff;
                 while (dEnd < descOff + 160 && dEnd < stat.length && stat[dEnd] != 0) dEnd++;
-                m.description = new String(stat, descOff, dEnd - descOff, StandardCharsets.US_ASCII).trim();
+                String description = new String(stat, descOff, dEnd - descOff, StandardCharsets.US_ASCII).trim();
 
                 int brfId = (s - 1 < primaryBrfIds.length) ? primaryBrfIds[s - 1] : s;
-                m.briefingText = assetManager.readBriefing(brfId);
-                if (m.briefingText.isEmpty()) {
-                    m.briefingText = m.description;
+                String briefingText = assetManager.readBriefing(brfId);
+                if (briefingText.isEmpty()) {
+                    briefingText = description;
                 }
 
                 // Read header of GAME%03d.SCN for turns & date
                 byte[] scn = assetManager.readAssetBytes(String.format(Locale.ROOT, "dat/GAME%03d.SCN", s));
                 ByteBuffer scnBb = ByteBuffer.wrap(scn).order(ByteOrder.LITTLE_ENDIAN);
-                m.turns = scn[18] & 0xFF;
-                m.day = scn[22] & 0xFF;
-                m.month = scn[23] & 0xFF;
-                m.year = 1900 + (scn[24] & 0xFF);
+                int turns = scn[18] & 0xFF;
+                int day = scn[22] & 0xFF;
+                int month = scn[23] & 0xFF;
+                int year = 1900 + (scn[24] & 0xFF);
                 int deployCount = Short.toUnsignedInt(scnBb.getShort(0x75));
                 int metaOff = 0x77 + deployCount * 4;
-                m.axisPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(metaOff)));
-                m.alliedPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(metaOff + 2)));
+                int axisPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(metaOff)));
+                int alliedPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(metaOff + 2)));
 
                 // Match with SCENARIO.TDB for campaign branching
-                m.nextDecisive = (s < 38) ? String.valueOf(s + 1) : "VICTORY";
-                m.nextMarginal = (s < 38) ? String.valueOf(s + 1) : "VICTORY";
-                m.nextLoss = "LOSS";
-                m.decisiveTurnsRemaining = Math.max(3, m.turns / 4);
-                m.prestigeDecisive = 600;
-                m.prestigeMarginal = 400;
-                m.prestigeLoss = 200;
+                String nextDecisive = (s < 38) ? String.valueOf(s + 1) : "VICTORY";
+                String nextMarginal = (s < 38) ? String.valueOf(s + 1) : "VICTORY";
+                String nextLoss = "LOSS";
+                int decisiveTurnsRemaining = Math.max(3, turns / 4);
+                int prestigeDecisive = 600;
+                int prestigeMarginal = 400;
+                int prestigeLoss = 200;
 
-                String[] tdb = tdbMap.get(m.shortTitle.toUpperCase(Locale.ROOT));
+                String[] tdb = tdbMap.get(shortTitle.toUpperCase(Locale.ROOT));
                 if (tdb == null) {
                     for (Map.Entry<String, String[]> entry : tdbMap.entrySet()) {
-                        if (entry.getKey().startsWith(m.shortTitle.toUpperCase(Locale.ROOT))) {
+                        if (entry.getKey().startsWith(shortTitle.toUpperCase(Locale.ROOT))) {
                             tdb = entry.getValue();
-                            m.fullTitle = tdb[0].trim();
+                            fullTitle = tdb[0].trim();
                             break;
                         }
                     }
                 }
                 if (tdb != null && tdb.length >= 10) {
-                    m.fullTitle = tdb[0].trim();
-                    m.nextDecisive = tdb[2].trim();
-                    m.nextMarginal = tdb[3].trim();
-                    m.nextLoss = tdb[4].trim();
-                    try { m.prestigeDecisive = Integer.parseInt(tdb[7].trim()); } catch (Exception ignored) {}
-                    try { m.prestigeMarginal = Integer.parseInt(tdb[8].trim()); } catch (Exception ignored) {}
-                    try { m.prestigeLoss = Integer.parseInt(tdb[9].trim()); } catch (Exception ignored) {}
+                    fullTitle = tdb[0].trim();
+                    nextDecisive = tdb[2].trim();
+                    nextMarginal = tdb[3].trim();
+                    nextLoss = tdb[4].trim();
+                    try { prestigeDecisive = Integer.parseInt(tdb[7].trim()); } catch (Exception ignored) {}
+                    try { prestigeMarginal = Integer.parseInt(tdb[8].trim()); } catch (Exception ignored) {}
+                    try { prestigeLoss = Integer.parseInt(tdb[9].trim()); } catch (Exception ignored) {}
                 }
+
+                ScenarioMeta m = ScenarioMeta.builder()
+                        .number(s)
+                        .shortTitle(shortTitle)
+                        .fullTitle(fullTitle)
+                        .description(description)
+                        .briefingText(briefingText)
+                        .turns(turns)
+                        .day(day)
+                        .month(month)
+                        .year(year)
+                        .axisPrestige(axisPrestige)
+                        .alliedPrestige(alliedPrestige)
+                        .nextDecisive(nextDecisive)
+                        .nextMarginal(nextMarginal)
+                        .nextLoss(nextLoss)
+                        .decisiveTurnsRemaining(decisiveTurnsRemaining)
+                        .prestigeDecisive(prestigeDecisive)
+                        .prestigeMarginal(prestigeMarginal)
+                        .prestigeLoss(prestigeLoss)
+                        .build();
                 scenarios.add(m);
             }
         } catch (IOException ignored) {
@@ -448,54 +503,69 @@ public class PgDatabase {
         ByteBuffer stmBb = ByteBuffer.wrap(stm).order(ByteOrder.LITTLE_ENDIAN);
         ByteBuffer scnBb = ByteBuffer.wrap(scn).order(ByteOrder.LITTLE_ENDIAN);
 
-        ScenarioData sd = new ScenarioData();
-        sd.meta = meta;
-        sd.cols = Short.toUnsignedInt(setBb.getShort(101)) + 1;
-        sd.rows = Short.toUnsignedInt(setBb.getShort(103)) + 1;
-        int nCells = sd.cols * sd.rows;
+        int cols = Short.toUnsignedInt(setBb.getShort(101)) + 1;
+        int rows = Short.toUnsignedInt(setBb.getShort(103)) + 1;
+        int nCells = cols * rows;
 
-        sd.axisNations = new int[]{
+        int[] axisNations = new int[]{
             scn[0] & 0xFF, scn[2] & 0xFF, scn[4] & 0xFF,
             scn[6] & 0xFF, scn[8] & 0xFF, scn[10] & 0xFF
         };
-        sd.alliedNations = new int[]{
+        int[] alliedNations = new int[]{
             scn[1] & 0xFF, scn[3] & 0xFF, scn[5] & 0xFF,
             scn[7] & 0xFF, scn[9] & 0xFF, scn[11] & 0xFF
         };
-        sd.axisDirection = scn[16] & 0xFF;
+        int axisDirection = scn[16] & 0xFF;
 
-        int defaultAxisNation = sd.axisNations[0] > 0 ? sd.axisNations[0] : 8;
-        int defaultAlliedNation = sd.alliedNations[0] > 0 ? sd.alliedNations[0] : 16;
+        int defaultAxisNation = axisNations[0] > 0 ? axisNations[0] : 8;
+        int defaultAlliedNation = alliedNations[0] > 0 ? alliedNations[0] : 16;
 
-        sd.grid = new HexCell[sd.cols][sd.rows];
-        for (int r = 0; r < sd.rows; r++) {
-            for (int c = 0; c < sd.cols; c++) {
-                int idx = r * sd.cols + c;
-                HexCell cell = new HexCell();
-                cell.col = c;
-                cell.row = r;
-                cell.nameIndex = Short.toUnsignedInt(setBb.getShort(123 + idx * 2));
-                cell.roadFlags = set[123 + 2 * nCells + idx] & 0xFF;
+        HexCell[][] grid = new HexCell[cols][rows];
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                int idx = r * cols + c;
+                int nameIndex = Short.toUnsignedInt(setBb.getShort(123 + idx * 2));
+                int roadFlags = set[123 + 2 * nCells + idx] & 0xFF;
                 int rawOwnerNation = set[123 + 3 * nCells + idx] & 0xFF;
                 int sideFlag = set[123 + 4 * nCells + idx] & 0xFF;
-                cell.tileSpriteId = Short.toUnsignedInt(setBb.getShort(123 + 5 * nCells + idx * 2));
-                cell.stmTerrain = Short.toUnsignedInt(stmBb.getShort(idx * 2));
-                cell.terrainType = normalizeTerrain(cell.stmTerrain, cell.nameIndex, cell.tileSpriteId);
-                if (cell.nameIndex >= 0 && cell.nameIndex < mapNames.size()) {
-                    cell.name = mapNames.get(cell.nameIndex);
-                } else {
-                    cell.name = cell.getTerrainName();
-                }
+                int tileSpriteId = Short.toUnsignedInt(setBb.getShort(123 + 5 * nCells + idx * 2));
+                int stmTerrain = Short.toUnsignedInt(stmBb.getShort(idx * 2));
+                int terrainType = normalizeTerrain(stmTerrain, nameIndex, tileSpriteId);
+                String name = (nameIndex >= 0 && nameIndex < mapNames.size()) ? mapNames.get(nameIndex) : HexCell.getTerrainName(terrainType);
+                boolean isSupply = (terrainType == 8 || terrainType == 3 || terrainType == 6 || terrainType == 12);
+                int ownerNation;
                 if (rawOwnerNation > 0) {
-                    cell.ownerNation = rawOwnerNation;
-                } else if (cell.isSupplyPoint()) {
-                    cell.ownerNation = (sideFlag == 0) ? defaultAxisNation : defaultAlliedNation;
+                    ownerNation = rawOwnerNation;
+                } else if (isSupply) {
+                    ownerNation = (sideFlag == 0) ? defaultAxisNation : defaultAlliedNation;
                 } else {
-                    cell.ownerNation = 0;
+                    ownerNation = 0;
                 }
-                sd.grid[c][r] = cell;
+
+                HexCell cell = HexCell.builder()
+                        .col(c)
+                        .row(r)
+                        .nameIndex(nameIndex)
+                        .name(name)
+                        .roadFlags(roadFlags)
+                        .ownerNation(ownerNation)
+                        .tileSpriteId(tileSpriteId)
+                        .stmTerrain(stmTerrain)
+                        .terrainType(terrainType)
+                        .build();
+                grid[c][r] = cell;
             }
         }
+
+        ScenarioData sd = ScenarioData.builder()
+                .meta(meta)
+                .cols(cols)
+                .rows(rows)
+                .axisNations(axisNations)
+                .alliedNations(alliedNations)
+                .axisDirection(axisDirection)
+                .grid(grid)
+                .build();
 
         // Parse up to 20 objective hex coordinates at offset 37..117
         for (int off = 37; off < 117 && off + 4 <= scn.length; off += 4) {
@@ -548,29 +618,29 @@ public class PgDatabase {
 
             if (uId <= 0 || uId >= equipment.size() || c >= sd.cols || r >= sd.rows) continue;
             UnitDef def = equipment.get(uId);
-            ActiveUnit u = new ActiveUnit();
-            u.instanceId = instId++;
-            u.unitDefId = uId;
-            u.transportDefId = (trpId > 0 && trpId < equipment.size()) ? trpId : 0;
-            u.nation = nat;
-            u.isAxis = isAxisNation(nat, sd);
-            u.isCore = u.isAxis && (auxFlag == 0);
-            u.col = c;
-            u.row = r;
-            u.strength = (str > 0 && str <= 15) ? str : 10;
-            u.entrenchment = ent;
-            u.experience = expStars * 100;
-            u.fuel = def.maxFuel > 0 ? def.maxFuel : 99;
-            u.ammo = def.maxAmmo > 0 ? def.maxAmmo : 99;
-            u.facingLeft = !u.isAxis;
-            u.customTitle = (u.instanceId) + ". " + def.name;
-
-            // Ground units placed in water at scenario start are embarked in Sea Transport boats
+            boolean isAxis = isAxisNation(nat, sd);
+            int currentInstId = instId++;
             HexCell startCell = sd.grid[c][r];
-            if (!def.isAir() && !def.isNaval() && startCell.isWater()) {
-                u.inSeaTransport = true;
-                u.mountedInTransport = false;
-            }
+            boolean inSea = !def.isAir() && !def.isNaval() && startCell.isWater();
+
+            ActiveUnit u = ActiveUnit.builder()
+                    .instanceId(currentInstId)
+                    .unitDefId(uId)
+                    .transportDefId((trpId > 0 && trpId < equipment.size()) ? trpId : 0)
+                    .nation(nat)
+                    .isAxis(isAxis)
+                    .isCore(isAxis && (auxFlag == 0))
+                    .col(c)
+                    .row(r)
+                    .strength((str > 0 && str <= 15) ? str : 10)
+                    .entrenchment(ent)
+                    .experience(expStars * 100)
+                    .fuel(def.maxFuel > 0 ? def.maxFuel : 99)
+                    .ammo(def.maxAmmo > 0 ? def.maxAmmo : 99)
+                    .facingLeft(!isAxis)
+                    .customTitle(currentInstId + ". " + def.name)
+                    .inSeaTransport(inSea)
+                    .build();
 
             sd.initialUnits.add(u);
 
