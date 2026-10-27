@@ -370,6 +370,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             PgDatabase.ActiveUnit undone = engine.undoLastMove();
             if (undone != null) {
                 sounds.playSelect();
+                mapView.centerOnHex(undone.col, undone.row);
                 mapView.selectUnit(undone);
                 refreshHud();
                 Toast.makeText(this, "Move undone for " + db.equipment.get(undone.unitDefId).name, Toast.LENGTH_SHORT).show();

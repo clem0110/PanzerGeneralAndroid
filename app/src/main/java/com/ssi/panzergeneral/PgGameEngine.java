@@ -61,12 +61,17 @@ public class PgGameEngine {
         public int prevFuel;
         public int prevMovePointsUsed;
         public boolean prevMoved;
+        public boolean prevAttacked;
+        public boolean prevInSeaTransport;
+        public boolean prevInAirTransport;
+        public boolean prevMountedInTransport;
         public int prevEntrenchment;
         public boolean prevFacingLeft;
         public int destCol;
         public int destRow;
         public int prevDestOwnerNation;
         public int prevAxisPrestige;
+        public boolean capturedNewHex;
     }
 
     @Data
@@ -815,7 +820,7 @@ public class PgGameEngine {
 
     public boolean canUndoLastMove() {
         return isPlayerTurn && lastUndoState != null && lastUndoState.unit != null
-                && units.contains(lastUndoState.unit) && !lastUndoState.unit.attacked;
+                && units.contains(lastUndoState.unit) && lastUndoState.unit.strength > 0;
     }
 
     public PgDatabase.ActiveUnit undoLastMove() {
@@ -824,14 +829,24 @@ public class PgGameEngine {
         u.col = lastUndoState.prevCol;
         u.row = lastUndoState.prevRow;
         u.fuel = lastUndoState.prevFuel;
-        u.movePointsUsed = lastUndoState.prevMovePointsUsed;
-        u.moved = lastUndoState.prevMoved;
+        u.movePointsUsed = 0;
+        u.moved = false;
+        u.attacked = lastUndoState.prevAttacked;
         u.entrenchment = lastUndoState.prevEntrenchment;
         u.facingLeft = lastUndoState.prevFacingLeft;
+        u.inSeaTransport = lastUndoState.prevInSeaTransport;
+        u.inAirTransport = lastUndoState.prevInAirTransport;
+        u.mountedInTransport = lastUndoState.prevMountedInTransport;
+
         scenario.grid[lastUndoState.destCol][lastUndoState.destRow].ownerNation = lastUndoState.prevDestOwnerNation;
         axisPrestige = lastUndoState.prevAxisPrestige;
+        if (lastUndoState.capturedNewHex) {
+            int hexKey = (lastUndoState.destCol << 8) | lastUndoState.destRow;
+            axisCapturedHexes.remove(hexKey);
+        }
         lastUndoState = null;
         recalculateFogOfWar();
+        checkVictoryConditions();
         return u;
     }
 
@@ -861,21 +876,27 @@ public class PgGameEngine {
             return true;
         }
 
-        Set<Integer> prevSpotted = getSpottedEnemyIds();
+        int hexKey = (destCol << 8) | destRow;
+        boolean wasNewHex = !axisCapturedHexes.contains(hexKey);
 
         UndoMoveState undo = UndoMoveState.builder()
                 .unit(u)
                 .prevCol(u.col)
                 .prevRow(u.row)
                 .prevFuel(u.fuel)
-                .prevMovePointsUsed(u.movePointsUsed)
-                .prevMoved(u.moved)
+                .prevMovePointsUsed(0)
+                .prevMoved(false)
+                .prevAttacked(u.attacked)
+                .prevInSeaTransport(u.inSeaTransport)
+                .prevInAirTransport(u.inAirTransport)
+                .prevMountedInTransport(u.mountedInTransport)
                 .prevEntrenchment(u.entrenchment)
                 .prevFacingLeft(u.facingLeft)
                 .destCol(destCol)
                 .destRow(destRow)
                 .prevDestOwnerNation(scenario.grid[destCol][destRow].ownerNation)
                 .prevAxisPrestige(axisPrestige)
+                .capturedNewHex(wasNewHex)
                 .build();
 
         boolean wasSeaTransport = u.inSeaTransport;
@@ -913,9 +934,7 @@ public class PgGameEngine {
         }
 
         recalculateFogOfWar();
-        Set<Integer> afterSpotted = getSpottedEnemyIds();
-        boolean revealedNewEnemy = ! prevSpotted.containsAll(afterSpotted);
-        if (u.isAxis && !revealedNewEnemy && !u.attacked) {
+        if (u.isAxis) {
             lastUndoState = undo;
         } else {
             lastUndoState = null;
@@ -2477,6 +2496,8 @@ public class PgGameEngine {
             } else {
                 scenarioOutcome = 3; // Loss
             }
+        } else {
+            scenarioOutcome = 0;
         }
     }
 
