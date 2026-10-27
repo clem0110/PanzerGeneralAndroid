@@ -677,8 +677,16 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 break;
             }
         }
+        PgDatabase.UnitDef pendingDef = (mapView.pendingPurchaseUnitId > 0 && mapView.pendingPurchaseUnitId < db.equipment.size())
+                ? db.equipment.get(mapView.pendingPurchaseUnitId) : null;
+        boolean isAir = pendingDef != null && pendingDef.isAir();
+
         if (!ok) {
-            Toast.makeText(this, "Tap any controlled city or any of the 6 cyan hexagons next to a controlled city to deploy.", Toast.LENGTH_SHORT).show();
+            if (isAir) {
+                Toast.makeText(this, "Planes can only be placed on or next to controlled airports with no enemy adjacent.", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Ground units can only be placed on or next to controlled cities with no enemy adjacent.", Toast.LENGTH_SHORT).show();
+            }
             return;
         }
         PgDatabase.ActiveUnit created = engine.purchaseUnit(
@@ -1478,8 +1486,15 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
     private void startUnitPlacement(int unitDefId, int transportDefId) {
         List<int[]> spots = engine.getAvailableDeployHexes(unitDefId);
+        PgDatabase.UnitDef def = (unitDefId > 0 && unitDefId < db.equipment.size()) ? db.equipment.get(unitDefId) : null;
+        boolean isAir = def != null && def.isAir();
+
         if (spots.isEmpty()) {
-            Toast.makeText(this, "No unoccupied hexes on or adjacent to your controlled cities!", Toast.LENGTH_LONG).show();
+            if (isAir) {
+                Toast.makeText(this, "No secure airports available! Planes must be placed by friendly airports free from enemy contact.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "No secure cities available! Units must be placed by friendly cities free from enemy contact.", Toast.LENGTH_LONG).show();
+            }
             return;
         }
         mapView.pendingPurchaseUnitId = unitDefId;
@@ -1500,7 +1515,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
         mapView.centerOnHex(targetSpot[0], targetSpot[1]);
         mapView.invalidate();
-        Toast.makeText(this, "Tap any controlled city or any of the 6 cyan hexagons next to a controlled city to deploy.", Toast.LENGTH_LONG).show();
+        if (isAir) {
+            Toast.makeText(this, "Tap a controlled airport or adjacent hexagon (free from enemy contact) to deploy.", Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "Tap a controlled city or adjacent hexagon (free from enemy contact) to deploy.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void showActiveUnitActionsModal(PgDatabase.ActiveUnit u) {

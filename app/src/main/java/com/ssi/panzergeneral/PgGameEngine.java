@@ -286,6 +286,22 @@ public class PgGameEngine {
         return false;
     }
 
+    public boolean hasEnemyAdjacentOrOnHex(int col, int row, boolean isAxis) {
+        if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
+        PgDatabase.ActiveUnit gOn = getUnitAt(col, row, false);
+        if (gOn != null && gOn.isAxis != isAxis && gOn.strength > 0) return true;
+        PgDatabase.ActiveUnit aOn = getUnitAt(col, row, true);
+        if (aOn != null && aOn.isAxis != isAxis && aOn.strength > 0) return true;
+
+        for (int[] nb : getNeighbors(col, row)) {
+            PgDatabase.ActiveUnit gNb = getUnitAt(nb[0], nb[1], false);
+            if (gNb != null && gNb.isAxis != isAxis && gNb.strength > 0) return true;
+            PgDatabase.ActiveUnit aNb = getUnitAt(nb[0], nb[1], true);
+            if (aNb != null && aNb.isAxis != isAxis && aNb.strength > 0) return true;
+        }
+        return false;
+    }
+
     public List<int[]> getAvailableDeployHexes() {
         return getAvailableDeployHexes(0);
     }
@@ -294,30 +310,71 @@ public class PgGameEngine {
         List<int[]> res = new ArrayList<>();
         if (scenario == null) return res;
 
-        boolean isAir = (unitDefId > 0 && unitDefId < db.equipment.size())
-                && db.equipment.get(unitDefId).isAir();
+        // Initial scenario setup (campaign carry-over before battle begins)
+        if (unitDefId == 0) {
+            boolean[][] added = new boolean[scenario.cols][scenario.rows];
+            for (int[] d : scenario.deployHexes) {
+                int dc = d[0], dr = d[1];
+                if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false)) {
+                        added[dc][dr] = true;
+                        res.add(new int[]{dc, dr});
+                    }
+                }
+            }
+            for (int c = 0; c < scenario.cols; c++) {
+                for (int r = 0; r < scenario.rows; r++) {
+                    PgDatabase.HexCell cell = scenario.grid[c][r];
+                    if (cell.terrainType == 8 && db.isAxisNation(cell.ownerNation, scenario)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, false)) {
+                            added[c][r] = true;
+                            res.add(new int[]{c, r});
+                        }
+                    }
+                }
+            }
+            return res;
+        }
+
+        PgDatabase.UnitDef def = (unitDefId > 0 && unitDefId < db.equipment.size()) ? db.equipment.get(unitDefId) : null;
+        boolean isAir = def != null && def.isAir();
         boolean[][] added = new boolean[scenario.cols][scenario.rows];
 
-        // 1. Check every city / supply point / objective on the map
+        // 1994 Panzer General Rule:
+        // - Purchased ground units can only be placed on or adjacent to player-controlled cities (terrainType 8)
+        // - Purchased planes can only be placed on or adjacent to player-controlled airports / airfields (terrainType 6)
+        // - If an enemy unit is on or next to the city or airport, it is under siege and NO units can be placed there!
+        int targetBaseTerrain = isAir ? 6 : 8;
+
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
-                if (cell.terrainType == 8 || cell.isSupplyPoint() || cell.isObjective) {
-                    // Ensure any city currently occupied by an Axis ground unit is marked Axis-controlled
+                if (cell.terrainType == targetBaseTerrain) {
+                    // Update ownership if currently occupied by an Axis ground unit
                     PgDatabase.ActiveUnit gndOcc = getUnitAt(c, r, false);
                     if (gndOcc != null && gndOcc.isAxis && !db.isAxisNation(cell.ownerNation, scenario)) {
                         cell.ownerNation = gndOcc.nation;
                     }
+
                     if (db.isAxisNation(cell.ownerNation, scenario)) {
-                        // Allow deploying directly on the controlled city/supply hex itself
+                        // If enemy has a unit next to the city/airport (or on it), no units can be placed there
+                        if (hasEnemyAdjacentOrOnHex(c, r, true)) {
+                            continue;
+                        }
+
+                        // Base hex itself (if unoccupied and valid)
                         if (!added[c][r] && canDeployAtHex(c, r, isAir)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
-                        // Allow deploying in ANY of the 6 hexagons adjacent to the controlled city
+
+                        // Adjacent hexagons next to the controlled city/airport
                         for (int[] nb : getNeighbors(c, r)) {
                             int nc = nb[0], nr = nb[1];
-                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir)) {
+                            // Candidate deploy hex must be unoccupied, valid terrain,
+                            // and not adjacent to any enemy unit
+                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir)
+                                    && !hasEnemyAdjacentOrOnHex(nc, nr, true)) {
                                 added[nc][nr] = true;
                                 res.add(new int[]{nc, nr});
                             }
@@ -327,16 +384,6 @@ public class PgGameEngine {
             }
         }
 
-        // 2. Also include initial scenario deployment hexes
-        for (int[] d : scenario.deployHexes) {
-            int dc = d[0], dr = d[1];
-            if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
-                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir)) {
-                    added[dc][dr] = true;
-                    res.add(new int[]{dc, dr});
-                }
-            }
-        }
         return res;
     }
 
@@ -347,8 +394,8 @@ public class PgGameEngine {
         // Cannot deploy onto a hex that has an enemy unit on the other layer
         PgDatabase.ActiveUnit otherLayerUnit = getUnitAt(col, row, !isAir);
         if (otherLayerUnit != null && !otherLayerUnit.isAxis) return false;
-        // Ground units cannot deploy onto deep ocean hexes
-        if (!isAir && scenario.grid[col][row].terrainType == 2) return false;
+        // Ground units cannot deploy onto deep ocean or water hexes
+        if (!isAir && (scenario.grid[col][row].terrainType == 2 || scenario.grid[col][row].isWater())) return false;
         return true;
     }
 
@@ -1886,6 +1933,16 @@ public class PgGameEngine {
         if (axisPrestige < totalCost) return null;
         if (getUnitAt(col, row, def.isAir()) != null) return null;
 
+        List<int[]> validSpots = getAvailableDeployHexes(unitDefId);
+        boolean validSpot = false;
+        for (int[] s : validSpots) {
+            if (s[0] == col && s[1] == row) {
+                validSpot = true;
+                break;
+            }
+        }
+        if (!validSpot) return null;
+
         axisPrestige -= totalCost;
         int curId = nextInstanceId++;
         PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
@@ -1921,8 +1978,8 @@ public class PgGameEngine {
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
-                if ((cell.terrainType == 8 || cell.isSupplyPoint() || cell.isObjective)
-                        && cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, scenario)) {
+                if (cell.terrainType == 8 && cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, scenario)) {
+                    if (hasEnemyAdjacentOrOnHex(c, r, false)) continue;
                     if (getUnitAt(c, r, false) == null) {
                         res.add(new int[]{c, r});
                     }
