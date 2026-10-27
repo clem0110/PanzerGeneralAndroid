@@ -64,6 +64,7 @@ public class PgDatabase {
         public int startYear;
         public int endYear;
         public int nationMask;
+        public int entrenchmentRate = 1;
 
         public boolean isAir() {
             return unitClass == CLASS_FIGHTER || unitClass == CLASS_TAC_BOMBER
@@ -77,6 +78,14 @@ public class PgDatabase {
 
         public boolean isArtilleryOrAD() {
             return unitClass == CLASS_ARTILLERY || unitClass == CLASS_AIR_DEFENSE;
+        }
+
+        public boolean isSelfPropelled() {
+            return isArtilleryOrAD() && movement > 1;
+        }
+
+        public boolean isTowedArtilleryOrAD() {
+            return isArtilleryOrAD() && movement <= 1;
         }
 
         public boolean isBridgeEngineer() {
@@ -162,13 +171,15 @@ public class PgDatabase {
             }
         }
 
-        // Panzer General Manual Terrain Initiative Cap
+        // Panzer General Official Strategy Guide Terrain Initiative Cap (Chapter 5)
         public int getInitiativeCap() {
             switch (terrainType) {
-                case 8: case 12: return 1; // City / Fortification
-                case 5: case 7: case 10: case 13: return 2; // Mountain / Swamp / Forest / Bocage
-                case 9: return 3; // Rough
-                default: return 99; // Open terrain uncapped
+                case 8: return 1; // City
+                case 10: case 12: case 13: return 3; // Forest, Bocage, Fortification
+                case 7: return 4; // Swamp
+                case 3: case 9: return 5; // Port, Rough
+                case 5: return 8; // Mountain
+                default: return 99; // Clear, Airfield, Desert, River, Ocean
             }
         }
 
@@ -239,6 +250,7 @@ public class PgDatabase {
         public List<int[]> objectives = new ArrayList<>();
         public List<int[]> deployHexes = new ArrayList<>();
         public List<ActiveUnit> initialUnits = new ArrayList<>();
+        public boolean isDefensiveScenario = false;
     }
 
     public final List<UnitDef> equipment = new ArrayList<>();
@@ -288,6 +300,10 @@ public class PgDatabase {
                 u.startYear = data[off + 47] & 0xFF;
                 u.endYear = data[off + 48] & 0xFF;
                 u.nationMask = data[off + 49] & 0xFF;
+                if (u.isPioneerOrEngineer()) u.entrenchmentRate = 3;
+                else if (u.unitClass == CLASS_INFANTRY) u.entrenchmentRate = 2;
+                else if (u.unitClass == CLASS_ANTI_TANK || u.unitClass == CLASS_ARTILLERY || u.unitClass == CLASS_AIR_DEFENSE) u.entrenchmentRate = 1;
+                else u.entrenchmentRate = 0;
                 equipment.add(u);
             }
         } catch (IOException ignored) {
@@ -562,6 +578,12 @@ public class PgDatabase {
             if (!def.isAir() && (sd.grid[c][r].isObjective || sd.grid[c][r].isSupplyPoint())) {
                 sd.grid[c][r].ownerNation = nat;
             }
+        }
+
+        if (meta != null && meta.fullTitle != null) {
+            String title = meta.fullTitle.toLowerCase(Locale.ROOT);
+            sd.isDefensiveScenario = title.contains("husky") || title.contains("anzio")
+                    || title.contains("d-day") || title.contains("berlin") || title.contains("defense");
         }
 
         return sd;

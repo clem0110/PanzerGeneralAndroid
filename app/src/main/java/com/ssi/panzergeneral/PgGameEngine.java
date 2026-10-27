@@ -63,6 +63,7 @@ public class PgGameEngine {
         public int maxTurns;
         public int weather; // 0 = Clear, 1 = Overcast, 2 = Rain/Snow
         public int groundCondition; // 0 = Dry, 1 = Mud, 2 = Frozen
+        public int wetness;
         public int axisPrestige;
         public int alliedPrestige;
         public boolean supplyEnabled = true;
@@ -96,6 +97,11 @@ public class PgGameEngine {
     public boolean showHexGrid = true;       // Hex grid overlay toggle
     public boolean showUnitStrength = true;  // Unit strength & experience badges toggle
     public int prestigeModifier = 100;       // Axis Prestige handicap % (50, 75, 100, 125, 150, 200)
+    public int wetness = 0; // 0..5 internal moisture accumulator per Strategy Guide
+    public final Set<Integer> axisCapturedHexes = new HashSet<>();
+    public final Set<Integer> alliedCapturedHexes = new HashSet<>();
+    public final Set<Integer> axisLostHexes = new HashSet<>();
+    public final Set<Integer> alliedLostHexes = new HashSet<>();
 
     public boolean isPlayerTurn = true;
     public int scenarioOutcome = 0; // 0=Ongoing, 1=Decisive Victory, 2=Marginal Victory, 3=Loss
@@ -145,6 +151,11 @@ public class PgGameEngine {
         this.maxTurns = Math.max(10, scenario.meta.turns);
         this.weather = 0;
         this.groundCondition = 0;
+        this.wetness = 0;
+        this.axisCapturedHexes.clear();
+        this.alliedCapturedHexes.clear();
+        this.axisLostHexes.clear();
+        this.alliedLostHexes.clear();
         this.isPlayerTurn = true;
         this.scenarioOutcome = 0;
         this.lastUndoState = null;
@@ -383,7 +394,22 @@ public class PgGameEngine {
         for (PgDatabase.ActiveUnit u : units) {
             if (!u.isAxis || u.strength <= 0) continue;
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-            int spot = Math.max(1, def.spotting - ((weatherEnabled && weather > 0) ? 1 : 0));
+            int spot = def.spotting;
+            if (weatherEnabled) {
+                if (weather == 1) { // Overcast: Air spotting halved, ground spotting -1
+                    if (def.isAir() || u.inAirTransport) {
+                        spot = Math.max(1, (spot + 1) / 2);
+                    } else {
+                        spot = Math.max(1, spot - 1);
+                    }
+                } else if (weather == 2) { // Rain / Snow: Air spotting 1, ground spotting halved
+                    if (def.isAir() || u.inAirTransport) {
+                        spot = 1;
+                    } else {
+                        spot = Math.max(1, spot / 2);
+                    }
+                }
+            }
             for (int c = Math.max(0, u.col - spot - 1); c <= Math.min(scenario.cols - 1, u.col + spot + 1); c++) {
                 for (int r = Math.max(0, u.row - spot - 1); r <= Math.min(scenario.rows - 1, u.row + spot + 1); r++) {
                     if (hexDistance(u.col, u.row, c, r) <= spot) {
@@ -764,15 +790,7 @@ public class PgGameEngine {
 
         // Capture city / objective / airfield / port if ground unit moves onto it
         if (!airLayer && !u.inSeaTransport && !def.isNaval()) {
-            PgDatabase.HexCell cell = scenario.grid[destCol][destRow];
-            if (cell.isObjective || cell.isSupplyPoint() || cell.ownerNation > 0) {
-                boolean wasEnemy = db.isAxisNation(cell.ownerNation, scenario) != u.isAxis;
-                cell.ownerNation = u.nation;
-                if (wasEnemy && u.isAxis) {
-                    if (cell.isObjective) axisPrestige += 100;
-                    else if (cell.terrainType == 8) axisPrestige += 40;
-                }
-            }
+            onHexCaptured(destCol, destRow, u);
         }
 
         recalculateFogOfWar();
@@ -790,6 +808,246 @@ public class PgGameEngine {
         return true;
     }
 
+    public boolean isRiverHex(int col, int row) {
+        if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
+        PgDatabase.HexCell cell = scenario.grid[col][row];
+        return cell.terrainType == 4 && cell.roadFlags == 0;
+    }
+
+    public void onHexCaptured(int col, int row, PgDatabase.ActiveUnit capturer) {
+        if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows || capturer == null) return;
+        PgDatabase.HexCell cell = scenario.grid[col][row];
+        boolean isCityPortAirfield = (cell.terrainType == 8 || cell.terrainType == 6 || cell.isPort());
+        if (!cell.isObjective && !isCityPortAirfield && cell.ownerNation == 0) return;
+
+        boolean wasEnemy = db.isAxisNation(cell.ownerNation, scenario) != capturer.isAxis;
+        cell.ownerNation = capturer.nation;
+
+        // Strategy Guide Chapter 6 Initial Capture Prestige (+160/+40 to capturer, -80/-20 to loser)
+        if (wasEnemy) {
+            int hexKey = (col << 8) | row;
+            if (capturer.isAxis) {
+                if (!axisCapturedHexes.contains(hexKey)) {
+                    axisCapturedHexes.add(hexKey);
+                    int gain = cell.isObjective ? 160 : 40;
+                    axisPrestige += gain;
+                }
+                if (!alliedLostHexes.contains(hexKey)) {
+                    alliedLostHexes.add(hexKey);
+                    int loss = cell.isObjective ? 80 : 20;
+                    alliedPrestige = Math.max(0, alliedPrestige - loss);
+                }
+            } else {
+                if (!alliedCapturedHexes.contains(hexKey)) {
+                    alliedCapturedHexes.add(hexKey);
+                    int gain = cell.isObjective ? 160 : 40;
+                    alliedPrestige += gain;
+                }
+                if (!axisLostHexes.contains(hexKey)) {
+                    axisLostHexes.add(hexKey);
+                    int loss = cell.isObjective ? 80 : 20;
+                    axisPrestige = Math.max(0, axisPrestige - loss);
+                }
+            }
+        }
+    }
+
+    public int getStrategyGuideAttackGrade(PgDatabase.ActiveUnit attacker, PgDatabase.UnitDef aDef,
+                                          PgDatabase.ActiveUnit defender, PgDatabase.UnitDef dDef,
+                                          int dist, boolean stiffDefense) {
+        if (supplyEnabled && attacker.ammo <= 0) return 0;
+        if (weatherEnabled && weather == 2 && (isUnitOnAirLayer(attacker) || isUnitOnAirLayer(defender))) return 0;
+        if (aDef.unitClass == PgDatabase.CLASS_AIR_DEFENSE && !isUnitOnAirLayer(defender)) return 0;
+
+        int base;
+        if (isUnitOnAirLayer(defender)) {
+            base = aDef.airAttack;
+        } else if (defender.inSeaTransport || dDef.isNaval()) {
+            base = Math.max(aDef.navalAttack, defender.inSeaTransport ? Math.max(aDef.softAttack, aDef.hardAttack) : 0);
+        } else {
+            base = (dDef.targetType == PgDatabase.TARGET_HARD && !defender.mountedInTransport) ? aDef.hardAttack : aDef.softAttack;
+        }
+        if (base <= 0) return 0;
+
+        // +1 per experience star
+        int grade = base + attacker.getStars();
+
+        // +4 if defender is on unbridged river hex (and not an airplane)
+        if (!isUnitOnAirLayer(defender) && !defender.inSeaTransport && !dDef.isNaval()
+                && isRiverHex(defender.col, defender.row)
+                && !dDef.isBridgeEngineer()
+                && !hasFriendlyBridgeEngineer(defender.col, defender.row, defender.isAxis)) {
+            grade += 4;
+        }
+
+        // +4 if mounting stiff defense
+        if (stiffDefense) {
+            grade += 4;
+        }
+
+        return grade;
+    }
+
+    public int getStrategyGuideDefenseGrade(PgDatabase.ActiveUnit attacker, PgDatabase.UnitDef aDef,
+                                           PgDatabase.ActiveUnit defender, PgDatabase.UnitDef dDef,
+                                           int dist, boolean stiffDefense) {
+        int def;
+        if (isUnitOnAirLayer(attacker) || isUnitOnAirLayer(defender)) {
+            def = dDef.airDefense;
+        } else {
+            PgDatabase.HexCell cell = scenario.grid[defender.col][defender.row];
+            boolean closeCombat = (cell.isCloseDefenseTerrain() && aDef.unitClass == PgDatabase.CLASS_INFANTRY && dDef.unitClass != PgDatabase.CLASS_INFANTRY)
+                    || stiffDefense;
+            def = closeCombat ? Math.max(1, dDef.closeDefense) : dDef.groundDefense;
+        }
+
+        // Defensive Grade Modifiers (Cumulative) per Strategy Guide Chapter 5:
+        // + entrenchment: full entrenchment if attacker is non-infantry, 1/2 entrenchment if non-engineer infantry, 0 if pioneer/engineer
+        if (!isUnitOnAirLayer(defender) && !isUnitOnAirLayer(attacker)) {
+            if (aDef.isPioneerOrEngineer()) {
+                // Pioneers/Engineers ignore entrenchment
+            } else if (aDef.unitClass == PgDatabase.CLASS_INFANTRY) {
+                def += defender.entrenchment / 2;
+            } else {
+                def += defender.entrenchment;
+            }
+        }
+
+        // +8 for all ground units versus naval units
+        if (!isUnitOnAirLayer(defender) && (aDef.isNaval() || attacker.inSeaTransport)) {
+            def += 8;
+        }
+
+        // +3 versus ranged attacks when it's raining or snowing
+        if (weatherEnabled && weather == 2 && dist > 1) {
+            def += 3;
+        }
+
+        // +1 for each level of experience the unit enjoys
+        def += defender.getStars();
+
+        // +4 if the opponent (attacker) is not an airplane and is on an unbridged river hex
+        if (!isUnitOnAirLayer(attacker) && !attacker.inSeaTransport && !aDef.isNaval()
+                && isRiverHex(attacker.col, attacker.row)
+                && !aDef.isBridgeEngineer()
+                && !hasFriendlyBridgeEngineer(attacker.col, attacker.row, attacker.isAxis)) {
+            def += 4;
+        }
+
+        // +4 if the unit is defending in stiff defense
+        if (stiffDefense) {
+            def += 4;
+        }
+
+        // +2 for infantry versus anti-tank guns
+        if (dDef.unitClass == PgDatabase.CLASS_INFANTRY && aDef.unitClass == PgDatabase.CLASS_ANTI_TANK) {
+            def += 2;
+        }
+
+        return Math.max(1, def);
+    }
+
+    public int calculateEffectiveDifference(int attackGrade, int defenseGrade) {
+        int diff = attackGrade - defenseGrade;
+        if (diff > 4) {
+            return 4 + ((diff - 4) * 2) / 5;
+        }
+        return diff;
+    }
+
+    public int getEffectiveFiringStrength(PgDatabase.ActiveUnit u, PgDatabase.UnitDef def, boolean isAttacker) {
+        int str = Math.max(0, u.strength - u.suppression);
+        if (str <= 0) return 0;
+
+        // Out of fuel halves vehicle combat strength (Chapter 3)
+        if (supplyEnabled && def.maxFuel > 0 && !u.inAirTransport && !u.inSeaTransport && u.fuel <= 0) {
+            str = (str + 1) / 2;
+        }
+
+        // Overcast halves air combat strengths (Chapter 3)
+        if (weatherEnabled && weather == 1 && (def.isAir() || u.inAirTransport)) {
+            str = (str + 1) / 2;
+        }
+
+        // Mud halves ground attacking strength (Chapter 3)
+        if (weatherEnabled && groundCondition == 1 && isAttacker && !def.isAir() && !u.inAirTransport) {
+            str = (str + 1) / 2;
+        }
+
+        return Math.max(1, str);
+    }
+
+    public boolean isBombardment(PgDatabase.UnitDef def, int dist) {
+        if (def == null) return false;
+        return def.unitClass == PgDatabase.CLASS_ARTILLERY
+                || def.unitClass == PgDatabase.CLASS_LEVEL_BOMBER
+                || def.unitClass == PgDatabase.CLASS_FORT
+                || def.isNaval()
+                || dist > 1;
+    }
+
+    public double getD20HitProbability(int effDiff, boolean isBombardment) {
+        if (isBombardment) {
+            int minRoll = Math.max(1, Math.min(21, 19 - effDiff));
+            return (21 - minRoll) / 20.0;
+        } else {
+            int minRoll = Math.max(1, Math.min(21, 13 - effDiff));
+            return (21 - minRoll) / 20.0;
+        }
+    }
+
+    public double getD20SuppProbability(int effDiff, boolean isBombardment) {
+        if (isBombardment) {
+            int minRoll = Math.max(1, Math.min(21, 11 - effDiff));
+            int maxRoll = Math.max(0, Math.min(20, 18 - effDiff));
+            return (maxRoll >= minRoll) ? (maxRoll - minRoll + 1) / 20.0 : 0.0;
+        } else {
+            int minRoll = Math.max(1, Math.min(21, 11 - effDiff));
+            int maxRoll = Math.max(0, Math.min(20, 12 - effDiff));
+            return (maxRoll >= minRoll) ? (maxRoll - minRoll + 1) / 20.0 : 0.0;
+        }
+    }
+
+    public boolean canReturnFire(PgDatabase.ActiveUnit attacker, PgDatabase.UnitDef aDef,
+                                 PgDatabase.ActiveUnit defender, PgDatabase.UnitDef dDef, int dist) {
+        if (supplyEnabled && dDef.maxAmmo > 0 && defender.ammo <= 0) return false;
+        if (dist > 1) {
+            return aDef.unitClass == PgDatabase.CLASS_CAPITAL_SHIP && dDef.unitClass == PgDatabase.CLASS_CAPITAL_SHIP;
+        }
+        boolean aAir = isUnitOnAirLayer(attacker);
+        boolean dAir = isUnitOnAirLayer(defender);
+        if (aAir && !dAir) {
+            return dist == 0 && dDef.airAttack > 0;
+        }
+        if (!aAir && dAir) {
+            return false;
+        }
+        if (aAir && dAir) {
+            return dist == 1 && dDef.airAttack > 0 && dDef.unitClass != PgDatabase.CLASS_LEVEL_BOMBER;
+        }
+        if (aDef.unitClass == PgDatabase.CLASS_ARTILLERY) {
+            return false;
+        }
+        return dist == 1;
+    }
+
+    private int[] resolveD20Fire(int firingStr, int effDiff, boolean isBombardment) {
+        int hits = 0;
+        int supp = 0;
+        for (int i = 0; i < firingStr; i++) {
+            int roll = rng.nextInt(20) + 1;
+            int total = roll + effDiff;
+            if (isBombardment) {
+                if (total >= 19) hits++;
+                else if (total >= 11) supp++;
+            } else {
+                if (total >= 13) hits++;
+                else if (total >= 11) supp++;
+            }
+        }
+        return new int[]{hits, supp};
+    }
+
     public CombatPrediction predictCombat(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
         CombatPrediction pred = new CombatPrediction();
         PgDatabase.UnitDef aDef = attacker.inAirTransport ? getAirTransportDef()
@@ -798,26 +1056,29 @@ public class PgGameEngine {
                 : (defender.inSeaTransport ? getSeaTransportDef(defender.isAxis) : db.equipment.get(defender.unitDefId));
         int dist = hexDistance(attacker.col, attacker.row, defender.col, defender.row);
 
-        int atkVal = getAttackStat(attacker, aDef, defender, dDef);
-        int defVal = getDefenseStat(attacker, aDef, defender, dDef, defender.col, defender.row);
+        boolean isGroundClose = (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender));
+        pred.ruggedDefenseChance = (isGroundClose && defender.entrenchment >= 1 && !aDef.isPioneerOrEngineer());
 
-        // Experience & entrenchment modifiers
-        atkVal += attacker.getStars();
-        defVal += defender.getStars() + (isUnitOnAirLayer(defender) ? 0 : defender.entrenchment / 2);
+        int atkAttackGrade = getStrategyGuideAttackGrade(attacker, aDef, defender, dDef, dist, false);
+        int defDefenseGrade = getStrategyGuideDefenseGrade(attacker, aDef, defender, dDef, dist, false);
 
-        if (attacker.mountedInTransport || attacker.inSeaTransport || attacker.inAirTransport) {
-            atkVal = Math.max(1, atkVal / 2);
-        }
-        if (defender.mountedInTransport || defender.inSeaTransport || defender.inAirTransport) {
-            defVal = Math.max(1, defVal / 2);
-        }
-
-        // Out-of-fuel ground defense penalty (-3 GD when out of fuel)
-        if (supplyEnabled && !isUnitOnAirLayer(defender) && dDef.maxFuel > 0 && defender.fuel <= 0) {
-            defVal = Math.max(1, defVal - 3);
+        boolean defenderCanReturnFire = canReturnFire(attacker, aDef, defender, dDef, dist);
+        int defAttackGrade = 0;
+        int atkDefenseGrade = 0;
+        if (defenderCanReturnFire) {
+            defAttackGrade = getStrategyGuideAttackGrade(defender, dDef, attacker, aDef, dist, false);
+            atkDefenseGrade = getStrategyGuideDefenseGrade(defender, dDef, attacker, aDef, dist, false);
+            if (dDef.unitClass == PgDatabase.CLASS_ARTILLERY) {
+                atkDefenseGrade += 3;
+            }
         }
 
-        // Calculate Effective Initiative with Panzer General Manual Terrain Cap
+        int atkEffDiff = calculateEffectiveDifference(atkAttackGrade, defDefenseGrade);
+        int defEffDiff = calculateEffectiveDifference(defAttackGrade, atkDefenseGrade);
+
+        int atkStr = getEffectiveFiringStrength(attacker, aDef, true);
+        int defStr = getEffectiveFiringStrength(defender, dDef, false);
+
         PgDatabase.HexCell defCell = scenario.grid[defender.col][defender.row];
         int iniCap = (dist == 1 && !aDef.isAir() && !dDef.isAir()) ? defCell.getInitiativeCap() : 99;
         int aIni = Math.min(iniCap, aDef.initiative) + attacker.getStars();
@@ -829,50 +1090,41 @@ public class PgGameEngine {
         pred.effectiveAttackerIni = aIni;
         pred.effectiveDefenderIni = dIni;
 
-        int diff = atkVal - defVal;
-        double killRate = Math.max(0.08, Math.min(0.85, 0.30 + diff * 0.045));
-        double retRate = Math.max(0.05, Math.min(0.75, 0.22 - diff * 0.035));
+        boolean aBomb = isBombardment(aDef, dist);
+        boolean dBomb = isBombardment(dDef, dist);
 
-        boolean isAirAttackingGround = aDef.isAir() && !isUnitOnAirLayer(defender);
-        boolean isGroundAttackingAir = !aDef.isAir() && isUnitOnAirLayer(defender);
+        double atkPHit = (atkAttackGrade > 0) ? getD20HitProbability(atkEffDiff, aBomb) : 0.0;
+        double atkPSupp = (atkAttackGrade > 0) ? getD20SuppProbability(atkEffDiff, aBomb) : 0.0;
+        double defPHit = (defAttackGrade > 0) ? getD20HitProbability(defEffDiff, dBomb) : 0.0;
 
-        if (dist > 1 || isGroundAttackingAir
-                || (aDef.unitClass == PgDatabase.CLASS_LEVEL_BOMBER && dDef.airAttack <= 0)
-                || (isAirAttackingGround && dDef.airAttack <= 0)) {
-            // Ranged artillery / Ground AA vs Plane / Air vs Ground without AA takes no counter-attack
-            retRate = 0.0;
-            if (dist > 1) killRate *= 0.65;
-        } else if (isAirAttackingGround && dDef.airAttack > 0) {
-            // Ground defender returning fire against attacking plane uses its Air Attack vs Plane's Air Defense
-            int defDiff = dDef.airAttack - aDef.airDefense;
-            retRate = Math.max(0.05, Math.min(0.60, 0.20 + defDiff * 0.035));
-        }
-
-        double atkEffStr = attacker.getEffectiveStrength();
-        double defEffStr = defender.getEffectiveStrength();
-        // Out of ammo halves defender return fire
-        if (supplyEnabled && dDef.maxAmmo > 0 && defender.ammo <= 0) {
-            defEffStr *= 0.5;
-        }
-
-        // Initiative First-Strike modifier (20% per initiative lead) - applies to close combat dist <= 1 (including dist 0 overhead)
         int iniDiff = aIni - dIni;
-        double rawDefLosses = atkEffStr * killRate * 0.65;
-        double survivingDefStr = defEffStr;
-        if (iniDiff > 0 && dist <= 1) {
-            double firstStrikeRatio = Math.min(1.0, iniDiff * 0.20);
-            survivingDefStr = Math.max(0.0, defEffStr - rawDefLosses * firstStrikeRatio);
-        } else if (iniDiff < 0 && dist <= 1) {
-            double defFirstStrike = Math.min(1.0, (-iniDiff) * 0.20);
-            double earlyAtkLoss = defEffStr * retRate * 0.55 * defFirstStrike;
-            rawDefLosses = Math.max(0.0, (atkEffStr - earlyAtkLoss)) * killRate * 0.65;
+        double expDefLosses = 0.0;
+        double expAtkLosses = 0.0;
+
+        if (iniDiff > 0) {
+            expDefLosses = Math.min(defender.strength, atkStr * atkPHit);
+            double defSuppressed = atkStr * atkPSupp;
+            double remDefStr = Math.max(0.0, defStr - expDefLosses - defSuppressed);
+            if (defenderCanReturnFire) {
+                expAtkLosses = Math.min(attacker.strength, remDefStr * defPHit);
+            }
+        } else if (iniDiff < 0) {
+            if (defenderCanReturnFire) {
+                expAtkLosses = Math.min(attacker.strength, defStr * defPHit);
+                double remAtkStr = Math.max(0.0, atkStr - expAtkLosses);
+                expDefLosses = Math.min(defender.strength, remAtkStr * atkPHit);
+            } else {
+                expDefLosses = Math.min(defender.strength, atkStr * atkPHit);
+            }
+        } else {
+            expDefLosses = Math.min(defender.strength, atkStr * atkPHit);
+            if (defenderCanReturnFire) {
+                expAtkLosses = Math.min(attacker.strength, defStr * defPHit);
+            }
         }
 
-        pred.expectedDefenderLosses = Math.min(defender.strength, Math.max(0, (int) Math.round(rawDefLosses)));
-        pred.expectedAttackerLosses = Math.min(attacker.strength, Math.max(0, (int) Math.round(survivingDefStr * retRate * 0.55)));
-        // Pioneers / Engineers ignore enemy Rugged Defense
-        pred.ruggedDefenseChance = (!isUnitOnAirLayer(defender) && dist == 1 && defender.entrenchment >= 2
-                && !aDef.isPioneerOrEngineer() && aDef.unitClass != PgDatabase.CLASS_INFANTRY);
+        pred.expectedDefenderLosses = (int) Math.round(expDefLosses);
+        pred.expectedAttackerLosses = (int) Math.round(expAtkLosses);
         pred.artillerySupport = (findDefensiveSupport(attacker, defender) != null);
         pred.fighterInterceptor = (findAirInterceptorOrFlak(attacker, defender) != null);
         pred.summary = String.format(Locale.ROOT, "Expected: Atk -%d vs Def -%d (Ini %d:%d)%s%s",
@@ -937,40 +1189,124 @@ public class PgGameEngine {
             attacker.suppression = Math.min(attacker.strength, attacker.suppression + supHits);
         }
 
-        CombatPrediction pred = predictCombat(attacker, defender);
-        int atkLoss = Math.max(0, pred.expectedAttackerLosses + rng.nextInt(3) - 1);
-        int defLoss = Math.max(0, pred.expectedDefenderLosses + rng.nextInt(3) - 1);
-
-        // Surprise Ambush or Rugged Defense
+        // 3. Stiff Defense (Rugged Defense) Chance (Chapter 5)
+        boolean isGroundClose = (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender));
+        boolean stiffDefense = false;
         if (surpriseAmbush) {
-            atkLoss = Math.min(attacker.strength, atkLoss + 2);
-            defLoss = Math.max(0, defLoss - 1);
-        } else if (pred.ruggedDefenseChance && rng.nextInt(100) < (defender.entrenchment * 12)) {
-            rep.ruggedDefense = true;
-            atkLoss = Math.min(attacker.strength, atkLoss + 2);
-            defLoss = Math.max(0, defLoss - 1);
+            stiffDefense = true;
+        } else if (isGroundClose && defender.entrenchment >= 1 && !aDef.isPioneerOrEngineer()) {
+            double expRatio = (defender.getStars() + 2.0) / (attacker.getStars() + 2.0);
+            double entrRatio = (dDef.entrenchmentRate + 1.0) / (aDef.entrenchmentRate + 1.0);
+            double ambushChance = defender.entrenchment * expRatio * entrRatio * 5.0;
+            if (rng.nextInt(100) < (int) Math.round(ambushChance)) {
+                stiffDefense = true;
+            }
+        }
+        rep.ruggedDefense = stiffDefense;
+
+        // 4. Attack and Defense Grades per Strategy Guide Chapter 5
+        int atkAttackGrade = getStrategyGuideAttackGrade(attacker, aDef, defender, dDef, dist, false);
+        int defDefenseGrade = getStrategyGuideDefenseGrade(attacker, aDef, defender, dDef, dist, stiffDefense);
+
+        boolean defenderCanReturnFire = canReturnFire(attacker, aDef, defender, dDef, dist);
+        int defAttackGrade = 0;
+        int atkDefenseGrade = 0;
+        if (defenderCanReturnFire) {
+            defAttackGrade = getStrategyGuideAttackGrade(defender, dDef, attacker, aDef, dist, stiffDefense);
+            atkDefenseGrade = getStrategyGuideDefenseGrade(defender, dDef, attacker, aDef, dist, false);
+            if (dDef.unitClass == PgDatabase.CLASS_ARTILLERY) {
+                atkDefenseGrade += 3;
+            }
         }
 
-        // Ranged artillery & Level Bombers cause suppression and strip entrenchment/supply
+        int atkEffDiff = calculateEffectiveDifference(atkAttackGrade, defDefenseGrade);
+        int defEffDiff = calculateEffectiveDifference(defAttackGrade, atkDefenseGrade);
+
+        int atkStr = getEffectiveFiringStrength(attacker, aDef, true);
+        int defStr = getEffectiveFiringStrength(defender, dDef, false);
+
+        PgDatabase.HexCell defCell = scenario.grid[defender.col][defender.row];
+        int iniCap = (dist == 1 && !aDef.isAir() && !dDef.isAir()) ? defCell.getInitiativeCap() : 99;
+        int aIni = Math.min(iniCap, aDef.initiative) + attacker.getStars() + rng.nextInt(3) + 1;
+        int dIni = Math.min(iniCap, dDef.initiative) + defender.getStars() + rng.nextInt(3) + 1;
+        if (dist == 1 && defCell.isCloseDefenseTerrain()) {
+            if (aDef.unitClass == PgDatabase.CLASS_INFANTRY) aIni += 2;
+            if (dDef.unitClass == PgDatabase.CLASS_INFANTRY) dIni += 2;
+        }
+        if (stiffDefense) {
+            dIni += 99; // Defender fires first in stiff defense
+        }
+
+        boolean aBomb = isBombardment(aDef, dist);
+        boolean dBomb = isBombardment(dDef, dist);
+
+        int atkLoss = 0;
+        int defLoss = 0;
+        int atkSupp = 0;
+        int defSupp = 0;
+
+        // 5. Fire Resolution using D20 CRT (Chapter 5)
+        if (aIni > dIni) {
+            if (atkAttackGrade > 0 && atkStr > 0) {
+                int[] res = resolveD20Fire(atkStr, atkEffDiff, aBomb);
+                defLoss = Math.min(defender.strength, res[0]);
+                defSupp = Math.min(defender.strength - defLoss, res[1]);
+            }
+            if (defenderCanReturnFire && defAttackGrade > 0) {
+                int remDefStr = Math.max(0, defStr - defLoss - defSupp);
+                if (remDefStr > 0) {
+                    int[] res = resolveD20Fire(remDefStr, defEffDiff, dBomb);
+                    atkLoss = Math.min(attacker.strength, res[0]);
+                    atkSupp = Math.min(attacker.strength - atkLoss, res[1]);
+                }
+            }
+        } else if (dIni > aIni) {
+            if (defenderCanReturnFire && defAttackGrade > 0 && defStr > 0) {
+                int[] res = resolveD20Fire(defStr, defEffDiff, dBomb);
+                atkLoss = Math.min(attacker.strength, res[0]);
+                atkSupp = Math.min(attacker.strength - atkLoss, res[1]);
+            }
+            if (atkAttackGrade > 0) {
+                int remAtkStr = Math.max(0, atkStr - atkLoss - atkSupp);
+                if (remAtkStr > 0) {
+                    int[] res = resolveD20Fire(remAtkStr, atkEffDiff, aBomb);
+                    defLoss = Math.min(defender.strength, res[0]);
+                    defSupp = Math.min(defender.strength - defLoss, res[1]);
+                }
+            }
+        } else {
+            // Simultaneous fire
+            if (atkAttackGrade > 0 && atkStr > 0) {
+                int[] res = resolveD20Fire(atkStr, atkEffDiff, aBomb);
+                defLoss = Math.min(defender.strength, res[0]);
+                defSupp = Math.min(defender.strength - defLoss, res[1]);
+            }
+            if (defenderCanReturnFire && defAttackGrade > 0 && defStr > 0) {
+                int[] res = resolveD20Fire(defStr, defEffDiff, dBomb);
+                atkLoss = Math.min(attacker.strength, res[0]);
+                atkSupp = Math.min(attacker.strength - atkLoss, res[1]);
+            }
+        }
+
+        // Apply suppression & entrenchment effects
         if (aDef.unitClass == PgDatabase.CLASS_LEVEL_BOMBER && !isUnitOnAirLayer(defender)) {
-            int sup = 2 + rng.nextInt(3);
-            defender.suppression = Math.min(defender.strength, defender.suppression + sup);
-            rep.defenderSuppressed = sup;
+            defender.suppression = Math.min(defender.strength, defender.suppression + defSupp + 1);
+            rep.defenderSuppressed = defSupp + 1;
             defender.entrenchment = Math.max(0, defender.entrenchment - 2);
             if (supplyEnabled) {
                 defender.fuel = (defender.fuel * 3) / 4;
                 defender.ammo = (defender.ammo * 3) / 4;
             }
         } else if (dist > 1 || aDef.unitClass == PgDatabase.CLASS_ARTILLERY) {
-            int sup = 1 + rng.nextInt(3);
-            defender.suppression = Math.min(defender.strength, defender.suppression + sup);
-            rep.defenderSuppressed = sup;
+            defender.suppression = Math.min(defender.strength, defender.suppression + defSupp);
+            rep.defenderSuppressed = defSupp;
             if (!isUnitOnAirLayer(defender) && defender.entrenchment > 0) {
                 defender.entrenchment = Math.max(0, defender.entrenchment - 1);
             }
         } else if (!isUnitOnAirLayer(defender) && defender.entrenchment > 0) {
             int entStrip = aDef.isPioneerOrEngineer() ? 2 : 1;
             defender.entrenchment = Math.max(0, defender.entrenchment - entStrip);
+            rep.defenderSuppressed = defSupp;
         }
 
         atkLoss = Math.min(attacker.strength, atkLoss);
@@ -981,9 +1317,6 @@ public class PgGameEngine {
         attacker.attacked = true; // Every unit can attack once per turn
         attacker.mountedInTransport = false;
         if (supplyEnabled && aDef.maxAmmo > 0) attacker.ammo = Math.max(0, attacker.ammo - 1);
-        boolean defenderCanReturnFire = (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender))
-                || (isUnitOnAirLayer(attacker) && isUnitOnAirLayer(defender) && dist == 1)
-                || (isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender) && dist == 0 && dDef.airAttack > 0);
         if (supplyEnabled && defenderCanReturnFire && dDef.maxAmmo > 0 && defender.ammo > 0) {
             defender.ammo = Math.max(0, defender.ammo - 1);
         }
@@ -999,9 +1332,14 @@ public class PgGameEngine {
         int defOrigCol = defender.col;
         int defOrigRow = defender.row;
 
+        // Combat Prestige calculation per Strategy Guide Chapter 6
+        int enemyBasePrestige = Math.max(1, dDef.cost / 10);
+        int fullReward = (enemyBasePrestige * (defender.getStars() + 1)) / 2;
+
         if (rep.defenderDestroyed) {
             units.remove(defender);
-            if (attacker.isAxis) axisPrestige += 25;
+            if (attacker.isAxis) axisPrestige += fullReward;
+            else alliedPrestige += fullReward;
 
             // Panzer General Tank Overrun Rule:
             // If a Tank destroys a weak ground defender in close combat with 0 total attacker losses, it OVERRUNS!
@@ -1011,24 +1349,17 @@ public class PgGameEngine {
                 rep.overrun = true;
                 attacker.col = defOrigCol;
                 attacker.row = defOrigRow;
-                PgDatabase.HexCell cell = scenario.grid[defOrigCol][defOrigRow];
-                if (cell.isObjective || cell.isSupplyPoint() || cell.ownerNation > 0) {
-                    cell.ownerNation = attacker.nation;
-                    if (cell.isObjective && attacker.isAxis) axisPrestige += 100;
-                }
+                onHexCaptured(defOrigCol, defOrigRow, attacker);
             } else if (!attacker.isAxis && dist == 1 && !aDef.isAir() && !dDef.isAir() && !rep.attackerDestroyed
                     && getTerrainMoveCost(aDef, scenario.grid[defOrigCol][defOrigRow], false) < 99) {
                 // AI automatically advances into vacated hex on close assault
                 attacker.col = defOrigCol;
                 attacker.row = defOrigRow;
-                PgDatabase.HexCell cell = scenario.grid[defOrigCol][defOrigRow];
-                if (cell.isObjective || cell.isSupplyPoint() || cell.ownerNation > 0) {
-                    cell.ownerNation = attacker.nation;
-                }
+                onHexCaptured(defOrigCol, defOrigRow, attacker);
             }
         } else if (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender)
                 && (defLoss >= 3 && defLoss > atkLoss || defender.getEffectiveStrength() == 0)) {
-            // Defender is forced to retreat; if surrounded / all retreat hexes blocked by units or ZOC, Defender SURRENDERS!
+            // Defender is forced to retreat
             boolean foundRetreat = false;
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
                 if (hexDistance(attacker.col, attacker.row, nb[0], nb[1]) > 1
@@ -1044,7 +1375,6 @@ public class PgGameEngine {
                 }
             }
             if (!foundRetreat) {
-                // Second pass: allow retreat to any passable unoccupied hex away from attacker
                 for (int[] nb : getNeighbors(defender.col, defender.row)) {
                     if (hexDistance(attacker.col, attacker.row, nb[0], nb[1]) > 1
                             && getUnitAt(nb[0], nb[1], false) == null
@@ -1058,19 +1388,31 @@ public class PgGameEngine {
                     }
                 }
             }
-            if (!foundRetreat) {
-                // No retreat path exists -> Unit SURRENDERS!
+            if (foundRetreat) {
+                if (attacker.isAxis) axisPrestige += Math.max(1, fullReward / 4);
+                else alliedPrestige += Math.max(1, fullReward / 4);
+            } else {
+                // No retreat path -> Unit SURRENDERS!
                 rep.defenderSurrendered = true;
                 rep.defenderDestroyed = true;
                 rep.defenderLosses = rep.defenderStartStr;
                 defender.strength = 0;
                 units.remove(defender);
-                if (attacker.isAxis) axisPrestige += 40;
+                if (attacker.isAxis) axisPrestige += fullReward;
+                else alliedPrestige += fullReward;
             }
+        } else if (defLoss > atkLoss) {
+            // Damage lead prestige reward
+            if (attacker.isAxis) axisPrestige += Math.max(1, fullReward / 8);
+            else alliedPrestige += Math.max(1, fullReward / 8);
         }
 
         if (rep.attackerDestroyed) {
             units.remove(attacker);
+            int atkBasePrestige = Math.max(1, aDef.cost / 10);
+            int atkFullReward = (atkBasePrestige * (attacker.getStars() + 1)) / 2;
+            if (defender.isAxis) axisPrestige += atkFullReward;
+            else alliedPrestige += atkFullReward;
         }
 
         recalculateFogOfWar();
@@ -1080,7 +1422,6 @@ public class PgGameEngine {
 
     private PgDatabase.ActiveUnit findAirInterceptorOrFlak(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
         if (!isUnitOnAirLayer(attacker)) return null;
-        // 1. Check adjacent friendly Fighter escort if target is a ground unit or bomber
         PgDatabase.UnitDef dDef = db.equipment.get(defender.unitDefId);
         if (!isUnitOnAirLayer(defender) || dDef.unitClass != PgDatabase.CLASS_FIGHTER) {
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
@@ -1094,7 +1435,6 @@ public class PgGameEngine {
                 }
             }
         }
-        // 2. Check adjacent friendly Air Defense (Flak) if target is a ground unit
         if (!isUnitOnAirLayer(defender)) {
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
                 PgDatabase.ActiveUnit adjGnd = getUnitAt(nb[0], nb[1], false);
@@ -1112,7 +1452,6 @@ public class PgGameEngine {
 
     private PgDatabase.ActiveUnit findDefensiveSupport(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
         if (!isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender)) {
-            // Look for adjacent friendly artillery with range >= 2 and ammo
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
                 PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
                 if (adj != null && adj.isAxis == defender.isAxis && (!supplyEnabled || adj.ammo > 0) && adj.strength > 0) {
@@ -1124,45 +1463,6 @@ public class PgGameEngine {
             }
         }
         return null;
-    }
-
-    private int getAttackStat(PgDatabase.ActiveUnit attacker, PgDatabase.UnitDef aDef,
-                              PgDatabase.ActiveUnit defender, PgDatabase.UnitDef dDef) {
-        int base;
-        if (isUnitOnAirLayer(defender)) base = aDef.airAttack;
-        else if (defender.inSeaTransport || dDef.isNaval()) {
-            base = Math.max(aDef.navalAttack, defender.inSeaTransport ? Math.max(aDef.softAttack, aDef.hardAttack) : 0);
-        }
-        else base = (dDef.targetType == PgDatabase.TARGET_HARD && !defender.mountedInTransport) ? aDef.hardAttack : aDef.softAttack;
-
-        // River penalty for ground attacker on an unbridged river hex
-        if (!isUnitOnAirLayer(attacker) && !attacker.inSeaTransport && !aDef.isNaval()) {
-            PgDatabase.HexCell aCell = scenario.grid[attacker.col][attacker.row];
-            if (aCell.terrainType == 4 && aCell.roadFlags == 0
-                    && !aDef.isBridgeEngineer()
-                    && !hasFriendlyBridgeEngineer(attacker.col, attacker.row, attacker.isAxis)) {
-                base = Math.max(1, base - 2);
-            }
-        }
-        return base;
-    }
-
-    private int getDefenseStat(PgDatabase.ActiveUnit attacker, PgDatabase.UnitDef aDef,
-                               PgDatabase.ActiveUnit defender, PgDatabase.UnitDef dDef, int defCol, int defRow) {
-        if (isUnitOnAirLayer(attacker) || isUnitOnAirLayer(defender)) return dDef.airDefense;
-        PgDatabase.HexCell cell = scenario.grid[defCol][defRow];
-        boolean closeCombat = cell.isCloseDefenseTerrain()
-                && aDef.unitClass == PgDatabase.CLASS_INFANTRY
-                && dDef.unitClass != PgDatabase.CLASS_INFANTRY;
-        int def = closeCombat ? Math.max(1, dDef.closeDefense) : dDef.groundDefense;
-
-        // River penalty for ground defender on an unbridged river hex
-        if (!defender.inSeaTransport && !dDef.isNaval() && cell.terrainType == 4 && cell.roadFlags == 0
-                && !dDef.isBridgeEngineer()
-                && !hasFriendlyBridgeEngineer(defCol, defRow, defender.isAxis)) {
-            def = Math.max(1, def - 2);
-        }
-        return def;
     }
 
     public boolean resupplyUnit(PgDatabase.ActiveUnit u) {
@@ -1360,18 +1660,30 @@ public class PgGameEngine {
             u.moved = true;
             u.attacked = true;
             u.movePointsUsed = getMaxMovementPoints(u);
-            PgDatabase.HexCell dropCell = scenario.grid[u.col][u.row];
-            if (dropCell.isObjective || dropCell.isSupplyPoint() || dropCell.ownerNation > 0) {
-                boolean wasEnemy = db.isAxisNation(dropCell.ownerNation, scenario) != u.isAxis;
-                dropCell.ownerNation = u.nation;
-                if (wasEnemy && u.isAxis) {
-                    if (dropCell.isObjective) axisPrestige += 100;
-                    else if (dropCell.terrainType == 8) axisPrestige += 40;
+            int origCol = u.col;
+            int origRow = u.row;
+            boolean scattered = false;
+            // Strategy Guide Chapter 3 Paratroop Scatter: 50% on target, 50% scatters 1 hex
+            if (rng.nextInt(100) < 50) {
+                List<int[]> validScatters = new ArrayList<>();
+                for (int[] nb : getNeighbors(origCol, origRow)) {
+                    PgDatabase.HexCell nbCell = scenario.grid[nb[0]][nb[1]];
+                    if (!nbCell.isWater() && getUnitAt(nb[0], nb[1], false) == null
+                            && getTerrainMoveCost(def, nbCell, false) < 99) {
+                        validScatters.add(nb);
+                    }
+                }
+                if (!validScatters.isEmpty()) {
+                    int[] chosen = validScatters.get(rng.nextInt(validScatters.size()));
+                    u.col = chosen[0];
+                    u.row = chosen[1];
+                    scattered = true;
                 }
             }
+            onHexCaptured(u.col, u.row, u);
             recalculateFogOfWar();
             checkVictoryConditions();
-            return def.name + " paradropped / landed at (" + u.col + "," + u.row + ")!";
+            return def.name + " paradropped / landed at (" + u.col + "," + u.row + ")" + (scattered ? " [Scattered!]" : "!");
         }
         if (u.inSeaTransport) {
             if (cell.isWater()) {
@@ -1389,15 +1701,7 @@ public class PgGameEngine {
             u.moved = true;
             u.attacked = true;
             u.movePointsUsed = getMaxMovementPoints(u);
-            PgDatabase.HexCell landCell = scenario.grid[u.col][u.row];
-            if (landCell.isObjective || landCell.isSupplyPoint() || landCell.ownerNation > 0) {
-                boolean wasEnemy = db.isAxisNation(landCell.ownerNation, scenario) != u.isAxis;
-                landCell.ownerNation = u.nation;
-                if (wasEnemy && u.isAxis) {
-                    if (landCell.isObjective) axisPrestige += 100;
-                    else if (landCell.terrainType == 8) axisPrestige += 40;
-                }
-            }
+            onHexCaptured(u.col, u.row, u);
             recalculateFogOfWar();
             checkVictoryConditions();
             return def.name + " disembarked at (" + u.col + "," + u.row + ")!";
@@ -1573,6 +1877,36 @@ public class PgGameEngine {
         // Advance turn counter and prepare Player units
         turn++;
         updateWeather();
+
+        // Strategy Guide Chapter 6: Continuing Control of Hexes
+        // Offensive player: +4 per objective, +1 per normal city/port/airfield
+        // Defending player: +8 per objective, +4 per normal city/port/airfield
+        if (scenario != null) {
+            boolean axisDefending = scenario.isDefensiveScenario;
+            for (int c = 0; c < scenario.cols; c++) {
+                for (int r = 0; r < scenario.rows; r++) {
+                    PgDatabase.HexCell cell = scenario.grid[c][r];
+                    boolean isCityPortAirfield = (cell.terrainType == 8 || cell.terrainType == 6 || cell.isPort());
+                    if (isCityPortAirfield || cell.isObjective) {
+                        boolean isAxisOwner = db.isAxisNation(cell.ownerNation, scenario);
+                        if (isAxisOwner) {
+                            if (cell.isObjective) {
+                                axisPrestige += axisDefending ? 8 : 4;
+                            } else {
+                                axisPrestige += axisDefending ? 4 : 1;
+                            }
+                        } else if (cell.ownerNation > 0) {
+                            if (cell.isObjective) {
+                                alliedPrestige += axisDefending ? 4 : 8;
+                            } else {
+                                alliedPrestige += axisDefending ? 1 : 4;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Iterator<PgDatabase.ActiveUnit> it = units.iterator();
         while (it.hasNext()) {
             PgDatabase.ActiveUnit u = it.next();
@@ -1624,15 +1958,27 @@ public class PgGameEngine {
         if (!weatherEnabled) {
             weather = 0;
             groundCondition = 0;
+            wetness = 0;
             return;
         }
         int roll = rng.nextInt(100);
-        if (roll < 72) weather = 0; // Clear
-        else if (roll < 90) weather = 1; // Overcast
-        else weather = 2; // Rain/Storm
+        if (roll < 72) {
+            weather = 0; // Clear
+            wetness = Math.max(0, wetness - 2);
+        } else if (roll < 90) {
+            weather = 1; // Overcast
+            wetness = Math.max(0, wetness - 1);
+        } else {
+            weather = 2; // Rain/Storm
+            wetness = Math.min(5, wetness + 2);
+        }
 
-        if (weather == 2) groundCondition = 1; // Mud
-        else if (groundCondition == 1 && weather == 0) groundCondition = 0; // Dry
+        // Strategy Guide Chapter 3: wetness >= 3 creates Mud/Snow; <= 2 is Dry
+        if (wetness >= 3) {
+            groundCondition = 1; // Mud / Snow
+        } else {
+            groundCondition = 0; // Dry
+        }
     }
 
     public void checkVictoryConditions() {
@@ -1676,6 +2022,7 @@ public class PgGameEngine {
         st.maxTurns = maxTurns;
         st.weather = weather;
         st.groundCondition = groundCondition;
+        st.wetness = wetness;
         st.axisPrestige = axisPrestige;
         st.alliedPrestige = alliedPrestige;
         st.supplyEnabled = supplyEnabled;
@@ -1712,6 +2059,7 @@ public class PgGameEngine {
             this.maxTurns = st.maxTurns;
             this.weather = st.weather;
             this.groundCondition = st.groundCondition;
+            this.wetness = st.wetness;
             this.axisPrestige = st.axisPrestige;
             this.alliedPrestige = st.alliedPrestige;
             this.supplyEnabled = st.supplyEnabled;

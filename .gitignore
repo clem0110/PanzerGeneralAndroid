@@ -12,3 +12,4 @@ app/build/
 captures/
 .externalNativeBuild
 .cxx
+pg_guide.txt
