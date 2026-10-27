@@ -9,6 +9,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -1916,6 +1917,33 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 .setPositiveButton("Back to List", (d, w) -> showEncyclopediaDialog())
                 .setNegativeButton("Close", null)
                 .show();
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (mapView != null && !mapView.strategicMapOverlay) {
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_PLUS:
+                case KeyEvent.KEYCODE_EQUALS:
+                case KeyEvent.KEYCODE_NUMPAD_ADD:
+                case KeyEvent.KEYCODE_PAGE_UP:
+                    sounds.playClick();
+                    mapView.zoomIn();
+                    return true;
+                case KeyEvent.KEYCODE_MINUS:
+                case KeyEvent.KEYCODE_NUMPAD_SUBTRACT:
+                case KeyEvent.KEYCODE_PAGE_DOWN:
+                    sounds.playClick();
+                    mapView.zoomOut();
+                    return true;
+                case KeyEvent.KEYCODE_0:
+                case KeyEvent.KEYCODE_NUMPAD_0:
+                    sounds.playClick();
+                    mapView.resetZoom();
+                    return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     @Override

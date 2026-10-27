@@ -29,9 +29,17 @@ public class PgMapView extends View {
     private final PgSoundManager sounds;
     private MapInteractionListener listener;
 
-    private float scale = 1.6f;
+    public static final float MIN_SCALE = 0.5f;
+    public static final float MAX_SCALE = 4.5f;
+    public static final float DEFAULT_SCALE = 1.6f;
+
+    private float scale = DEFAULT_SCALE;
     private float panX = 40f;
     private float panY = 80f;
+
+    private final RectF btnZoomInRect = new RectF();
+    private final RectF btnZoomResetRect = new RectF();
+    private final RectF btnZoomOutRect = new RectF();
 
     public boolean airModePreferred = false;
     public boolean strategicMapOverlay = false;
@@ -84,15 +92,7 @@ public class PgMapView extends View {
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
-                float factor = detector.getScaleFactor();
-                float prevScale = scale;
-                scale = Math.max(0.65f, Math.min(3.5f, scale * factor));
-                float focusX = detector.getFocusX();
-                float focusY = detector.getFocusY();
-                panX = focusX - (focusX - panX) * (scale / prevScale);
-                panY = focusY - (focusY - panY) * (scale / prevScale);
-                clampPan();
-                invalidate();
+                zoomBy(detector.getScaleFactor(), detector.getFocusX(), detector.getFocusY());
                 return true;
             }
         });
@@ -105,6 +105,9 @@ public class PgMapView extends View {
 
             @Override
             public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+                if (scaleDetector.isInProgress()) {
+                    return false;
+                }
                 panX -= distanceX;
                 panY -= distanceY;
                 clampPan();
@@ -113,11 +116,131 @@ public class PgMapView extends View {
             }
 
             @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                if (scale < 2.4f) {
+                    zoomAt(3.0f, e.getX(), e.getY());
+                } else {
+                    zoomAt(DEFAULT_SCALE, e.getX(), e.getY());
+                }
+                return true;
+            }
+
+            @Override
             public boolean onSingleTapUp(MotionEvent e) {
+                if (handleZoomControlTap(e.getX(), e.getY())) {
+                    return true;
+                }
                 handleTap(e.getX(), e.getY());
                 return true;
             }
         });
+    }
+
+    public void zoomBy(float factor, float focusX, float focusY) {
+        float prevScale = scale;
+        scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * factor));
+        panX = focusX - (focusX - panX) * (scale / prevScale);
+        panY = focusY - (focusY - panY) * (scale / prevScale);
+        clampPan();
+        invalidate();
+    }
+
+    public void zoomAt(float targetScale, float focusX, float focusY) {
+        float prevScale = scale;
+        scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, targetScale));
+        panX = focusX - (focusX - panX) * (scale / prevScale);
+        panY = focusY - (focusY - panY) * (scale / prevScale);
+        clampPan();
+        invalidate();
+    }
+
+    public void zoomIn() {
+        float cx = getWidth() > 0 ? getWidth() * 0.5f : 640f;
+        float cy = getHeight() > 0 ? getHeight() * 0.5f : 360f;
+        zoomBy(1.25f, cx, cy);
+    }
+
+    public void zoomOut() {
+        float cx = getWidth() > 0 ? getWidth() * 0.5f : 640f;
+        float cy = getHeight() > 0 ? getHeight() * 0.5f : 360f;
+        zoomBy(0.8f, cx, cy);
+    }
+
+    public void resetZoom() {
+        float cx = getWidth() > 0 ? getWidth() * 0.5f : 640f;
+        float cy = getHeight() > 0 ? getHeight() * 0.5f : 360f;
+        zoomAt(DEFAULT_SCALE, cx, cy);
+    }
+
+    public float getScale() {
+        return scale;
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        if ((event.getSource() & android.view.InputDevice.SOURCE_CLASS_POINTER) != 0) {
+            if (event.getAction() == MotionEvent.ACTION_SCROLL) {
+                float vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+                if (vScroll != 0f) {
+                    float factor = vScroll > 0 ? 1.2f : 0.83f;
+                    zoomBy(factor, event.getX(), event.getY());
+                    return true;
+                }
+            }
+        }
+        return super.onGenericMotionEvent(event);
+    }
+
+    private boolean handleZoomControlTap(float x, float y) {
+        if (strategicMapOverlay) return false;
+        if (btnZoomInRect.contains(x, y)) {
+            sounds.playClick();
+            zoomIn();
+            return true;
+        }
+        if (btnZoomResetRect.contains(x, y)) {
+            sounds.playClick();
+            resetZoom();
+            return true;
+        }
+        if (btnZoomOutRect.contains(x, y)) {
+            sounds.playClick();
+            zoomOut();
+            return true;
+        }
+        return false;
+    }
+
+    private void drawZoomControls(Canvas canvas) {
+        float btnW = 48f;
+        float btnH = 42f;
+        float rx = getWidth() - btnW - 14f;
+        float y = 14f;
+
+        btnZoomInRect.set(rx, y, rx + btnW, y + btnH);
+        y += btnH + 8f;
+        btnZoomResetRect.set(rx, y, rx + btnW, y + btnH);
+        y += btnH + 8f;
+        btnZoomOutRect.set(rx, y, rx + btnW, y + btnH);
+
+        drawSingleZoomButton(canvas, btnZoomInRect, "+", 0xFFFFD54F, 24f);
+        String scaleText = String.format(Locale.ROOT, "%.1fx", scale);
+        drawSingleZoomButton(canvas, btnZoomResetRect, scaleText, 0xFFECEFF1, 13f);
+        drawSingleZoomButton(canvas, btnZoomOutRect, "-", 0xFFFFD54F, 24f);
+    }
+
+    private void drawSingleZoomButton(Canvas canvas, RectF r, String label, int textColor, float textSize) {
+        badgePaint.setColor(0xD91B241D);
+        canvas.drawRoundRect(r, 8f, 8f, badgePaint);
+        hexStrokePaint.setColor(0xFFC5A059);
+        hexStrokePaint.setStrokeWidth(1.8f);
+        canvas.drawRoundRect(r, 8f, 8f, hexStrokePaint);
+
+        textPaint.setColor(textColor);
+        textPaint.setTextSize(textSize);
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        float textY = r.centerY() - (fm.ascent + fm.descent) * 0.5f;
+        canvas.drawText(label, r.centerX(), textY, textPaint);
     }
 
     public void setListener(MapInteractionListener listener) {
@@ -533,6 +656,10 @@ public class PgMapView extends View {
         }
 
         canvas.restore();
+
+        if (!strategicMapOverlay) {
+            drawZoomControls(canvas);
+        }
 
         // Draw floating combat report banner if recent
         if (lastCombatBanner != null && System.currentTimeMillis() < bannerExpireTime) {
