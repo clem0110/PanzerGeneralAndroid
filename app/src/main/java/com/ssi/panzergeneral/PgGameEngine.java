@@ -262,14 +262,19 @@ public class PgGameEngine {
         return db.equipment.get(Math.min(91, db.equipment.size() - 1));
     }
 
-    public int getEffectiveIconId(PgDatabase.ActiveUnit u) {
-        if (u == null) return 0;
-        if (u.inAirTransport) return getAirTransportDef().iconId;
-        if (u.inSeaTransport) return getSeaTransportDef(u.isAxis).iconId;
-        if (u.mountedInTransport && u.transportDefId > 0) {
-            return db.equipment.get(u.transportDefId).iconId;
+    public PgDatabase.UnitDef getEffectiveUnitDef(PgDatabase.ActiveUnit u) {
+        if (u == null) return null;
+        if (u.inAirTransport) return getAirTransportDef();
+        if (u.inSeaTransport) return getSeaTransportDef(u.isAxis);
+        if (u.mountedInTransport && u.transportDefId > 0 && u.transportDefId < db.equipment.size()) {
+            return db.equipment.get(u.transportDefId);
         }
-        return db.equipment.get(u.unitDefId).iconId;
+        return db.equipment.get(u.unitDefId);
+    }
+
+    public int getEffectiveIconId(PgDatabase.ActiveUnit u) {
+        PgDatabase.UnitDef eff = getEffectiveUnitDef(u);
+        return eff != null ? eff.iconId : 0;
     }
 
     public boolean hasFriendlyBridgeEngineer(int col, int row, boolean isAxis) {
@@ -477,20 +482,19 @@ public class PgGameEngine {
         if (u.inSeaTransport) {
             return Math.max(4, getSeaTransportDef(u.isAxis).movement);
         }
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-        int totalMove = def.movement;
-        if (u.transportDefId > 0 && u.transportDefId < db.equipment.size()) {
+        if (u.mountedInTransport && u.transportDefId > 0 && u.transportDefId < db.equipment.size()) {
             PgDatabase.UnitDef trp = db.equipment.get(u.transportDefId);
-            totalMove = Math.max(totalMove, trp.movement);
+            return trp.movement;
         }
-        return totalMove;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        return def.movement;
     }
 
     public int getRemainingMovementPoints(PgDatabase.ActiveUnit u) {
         if (u == null || u.moved || u.strength <= 0) return 0;
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        PgDatabase.UnitDef effDef = getEffectiveUnitDef(u);
         int remMove = Math.max(0, getMaxMovementPoints(u) - u.movePointsUsed);
-        if (supplyEnabled && def.maxFuel > 0 && !u.inAirTransport && !u.inSeaTransport) {
+        if (supplyEnabled && effDef != null && effDef.maxFuel > 0 && !u.inAirTransport && !u.inSeaTransport) {
             remMove = Math.min(remMove, u.fuel);
         }
         return remMove;
@@ -499,7 +503,7 @@ public class PgGameEngine {
     public Map<Integer, Integer> getReachableHexes(PgDatabase.ActiveUnit u) {
         Map<Integer, Integer> distMap = new HashMap<>();
         if (u == null || u.moved || u.strength <= 0) return distMap;
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        PgDatabase.UnitDef def = getEffectiveUnitDef(u);
         int maxMove = getRemainingMovementPoints(u);
         if (maxMove <= 0) return distMap;
 
@@ -630,8 +634,7 @@ public class PgGameEngine {
             return 1;
         }
         if (cell.isWater()) return 99;
-        boolean hasOrganicTransport = (u.transportDefId > 0 && u.transportDefId < db.equipment.size());
-        return getTerrainMoveCost(def, cell, u.mountedInTransport || hasOrganicTransport);
+        return getTerrainMoveCost(def, cell, u.mountedInTransport);
     }
 
     private int getTerrainMoveCost(PgDatabase.UnitDef def, PgDatabase.HexCell cell, boolean mounted) {
@@ -665,7 +668,7 @@ public class PgGameEngine {
                 || (supplyEnabled && attacker.ammo <= 0)) {
             return targets;
         }
-        PgDatabase.UnitDef aDef = db.equipment.get(attacker.unitDefId);
+        PgDatabase.UnitDef aDef = getEffectiveUnitDef(attacker);
         boolean aAir = isUnitOnAirLayer(attacker);
 
         for (PgDatabase.ActiveUnit u : units) {
@@ -674,8 +677,7 @@ public class PgGameEngine {
             int dist = hexDistance(attacker.col, attacker.row, u.col, u.row);
             boolean dAir = isUnitOnAirLayer(u);
             boolean dNaval = u.inSeaTransport || db.equipment.get(u.unitDefId).isNaval();
-            PgDatabase.UnitDef dDef = u.inAirTransport ? getAirTransportDef()
-                    : (u.inSeaTransport ? getSeaTransportDef(u.isAxis) : db.equipment.get(u.unitDefId));
+            PgDatabase.UnitDef dDef = getEffectiveUnitDef(u);
             if (canAttackTarget(attacker, aDef, aAir, u, dDef, dAir, dNaval, dist)) {
                 targets.add(u);
             }
@@ -690,9 +692,12 @@ public class PgGameEngine {
             return false;
         }
         if (attacker.inAirTransport || attacker.inSeaTransport) return false;
-        if (aDef.unitClass == PgDatabase.CLASS_LAND_TRANSPORT
-                || aDef.unitClass == PgDatabase.CLASS_AIR_TRANSPORT
+        if (aDef.unitClass == PgDatabase.CLASS_AIR_TRANSPORT
                 || aDef.unitClass == PgDatabase.CLASS_SEA_TRANSPORT) {
+            return false;
+        }
+        // If mounted in an unarmed transport (e.g. truck), it cannot attack
+        if (aDef.softAttack <= 0 && aDef.hardAttack <= 0 && aDef.airAttack <= 0 && aDef.navalAttack <= 0) {
             return false;
         }
 
@@ -784,7 +789,7 @@ public class PgGameEngine {
         if (!reach.containsKey(key)) return false;
 
         int cost = reach.get(key);
-        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        PgDatabase.UnitDef def = getEffectiveUnitDef(u);
         boolean airLayer = isUnitOnAirLayer(u);
 
         // Check for Surprise Contact (Ambush!) with hidden enemy unit at destination
@@ -923,7 +928,7 @@ public class PgGameEngine {
         } else if (defender.inSeaTransport || dDef.isNaval()) {
             base = Math.max(aDef.navalAttack, defender.inSeaTransport ? Math.max(aDef.softAttack, aDef.hardAttack) : 0);
         } else {
-            base = (dDef.targetType == PgDatabase.TARGET_HARD && !defender.mountedInTransport) ? aDef.hardAttack : aDef.softAttack;
+            base = (dDef.targetType == PgDatabase.TARGET_HARD) ? aDef.hardAttack : aDef.softAttack;
         }
         if (base <= 0) return 0;
 
@@ -964,7 +969,8 @@ public class PgGameEngine {
 
         // Defensive Grade Modifiers (Cumulative) per Strategy Guide Chapter 5:
         // + entrenchment: full entrenchment if attacker is non-infantry, 1/2 entrenchment if non-engineer infantry, 0 if pioneer/engineer
-        if (!isUnitOnAirLayer(defender) && !isUnitOnAirLayer(attacker)) {
+        // Mounted units receive 0 entrenchment bonus
+        if (!isUnitOnAirLayer(defender) && !isUnitOnAirLayer(attacker) && !defender.mountedInTransport) {
             if (aDef.isPioneerOrEngineer()) {
                 // Pioneers/Engineers ignore entrenchment
             } else if (aDef.unitClass == PgDatabase.CLASS_INFANTRY) {
@@ -1096,6 +1102,10 @@ public class PgGameEngine {
         if (aDef.unitClass == PgDatabase.CLASS_ARTILLERY) {
             return false;
         }
+        int returnAtk = (aDef.targetType == PgDatabase.TARGET_HARD) ? dDef.hardAttack : dDef.softAttack;
+        if (returnAtk <= 0 && dDef.airAttack <= 0) {
+            return false;
+        }
         return dist == 1;
     }
 
@@ -1117,10 +1127,8 @@ public class PgGameEngine {
     }
 
     public CombatPrediction predictCombat(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
-        PgDatabase.UnitDef aDef = attacker.inAirTransport ? getAirTransportDef()
-                : (attacker.inSeaTransport ? getSeaTransportDef(attacker.isAxis) : db.equipment.get(attacker.unitDefId));
-        PgDatabase.UnitDef dDef = defender.inAirTransport ? getAirTransportDef()
-                : (defender.inSeaTransport ? getSeaTransportDef(defender.isAxis) : db.equipment.get(defender.unitDefId));
+        PgDatabase.UnitDef aDef = getEffectiveUnitDef(attacker);
+        PgDatabase.UnitDef dDef = getEffectiveUnitDef(defender);
         int dist = hexDistance(attacker.col, attacker.row, defender.col, defender.row);
 
         boolean isGroundClose = (dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender));
@@ -1224,8 +1232,8 @@ public class PgGameEngine {
     }
 
     private CombatReport executeCombatInternal(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, boolean surpriseAmbush) {
-        PgDatabase.UnitDef aDef = db.equipment.get(attacker.unitDefId);
-        PgDatabase.UnitDef dDef = db.equipment.get(defender.unitDefId);
+        PgDatabase.UnitDef aDef = getEffectiveUnitDef(attacker);
+        PgDatabase.UnitDef dDef = getEffectiveUnitDef(defender);
         CombatReport rep = CombatReport.builder()
                 .attackerName(aDef.name)
                 .defenderName(dDef.name)
@@ -1413,7 +1421,6 @@ public class PgGameEngine {
         attacker.strength -= atkLoss;
         defender.strength -= defLoss;
         attacker.attacked = true; // Every unit can attack once per turn
-        attacker.mountedInTransport = false;
         if (supplyEnabled && aDef.maxAmmo > 0) attacker.ammo = Math.max(0, attacker.ammo - 1);
         if (supplyEnabled && defenderCanReturnFire && dDef.maxAmmo > 0 && defender.ammo > 0) {
             defender.ammo = Math.max(0, defender.ammo - 1);
@@ -1520,13 +1527,13 @@ public class PgGameEngine {
 
     private PgDatabase.ActiveUnit findAirInterceptorOrFlak(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
         if (!isUnitOnAirLayer(attacker)) return null;
-        PgDatabase.UnitDef dDef = db.equipment.get(defender.unitDefId);
+        PgDatabase.UnitDef dDef = getEffectiveUnitDef(defender);
         if (!isUnitOnAirLayer(defender) || dDef.unitClass != PgDatabase.CLASS_FIGHTER) {
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
                 PgDatabase.ActiveUnit adjAir = getUnitAt(nb[0], nb[1], true);
                 if (adjAir != null && adjAir.isAxis == defender.isAxis && adjAir.strength > 0
                         && (!supplyEnabled || (adjAir.ammo > 0 && adjAir.fuel > 0))) {
-                    PgDatabase.UnitDef fDef = db.equipment.get(adjAir.unitDefId);
+                    PgDatabase.UnitDef fDef = getEffectiveUnitDef(adjAir);
                     if (fDef.unitClass == PgDatabase.CLASS_FIGHTER) {
                         return adjAir;
                     }
@@ -1538,7 +1545,7 @@ public class PgGameEngine {
                 PgDatabase.ActiveUnit adjGnd = getUnitAt(nb[0], nb[1], false);
                 if (adjGnd != null && adjGnd.isAxis == defender.isAxis && adjGnd.strength > 0
                         && (!supplyEnabled || adjGnd.ammo > 0)) {
-                    PgDatabase.UnitDef adDef = db.equipment.get(adjGnd.unitDefId);
+                    PgDatabase.UnitDef adDef = getEffectiveUnitDef(adjGnd);
                     if (adDef.unitClass == PgDatabase.CLASS_AIR_DEFENSE && adDef.range >= 2) {
                         return adjGnd;
                     }
@@ -1553,7 +1560,7 @@ public class PgGameEngine {
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
                 PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
                 if (adj != null && adj.isAxis == defender.isAxis && (!supplyEnabled || adj.ammo > 0) && adj.strength > 0) {
-                    PgDatabase.UnitDef adjDef = db.equipment.get(adj.unitDefId);
+                    PgDatabase.UnitDef adjDef = getEffectiveUnitDef(adj);
                     if (adjDef.unitClass == PgDatabase.CLASS_ARTILLERY && adjDef.range >= 2) {
                         return adj;
                     }
@@ -1826,7 +1833,11 @@ public class PgGameEngine {
         }
         if (u.transportDefId > 0) {
             u.mountedInTransport = !u.mountedInTransport;
-            return def.name + (u.mountedInTransport ? " mounted transport." : " dismounted for combat.");
+            if (u.mountedInTransport) {
+                u.entrenchment = 0;
+            }
+            PgDatabase.UnitDef trp = db.equipment.get(u.transportDefId);
+            return def.name + (u.mountedInTransport ? " mounted in " + trp.name + " (" + trp.movement + " MP)." : " dismounted for foot combat (" + def.movement + " MP).");
         }
         return null;
     }
@@ -2065,6 +2076,22 @@ public class PgGameEngine {
             PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
             if (def.isAir() || def.isNaval() || def.range > 1) {
                 if (ai.attacked) continue;
+            }
+
+            // AI Transport Management: mount up when moving over distance, dismount when near frontline
+            if (ai.transportDefId > 0 && !ai.moved && ai.movePointsUsed == 0) {
+                boolean nearEnemy = false;
+                for (PgDatabase.ActiveUnit e : units) {
+                    if (e.isAxis && e.strength > 0 && hexDistance(ai.col, ai.row, e.col, e.row) <= 2) {
+                        nearEnemy = true;
+                        break;
+                    }
+                }
+                if (nearEnemy && ai.mountedInTransport) {
+                    ai.mountedInTransport = false;
+                } else if (!nearEnemy && !ai.mountedInTransport && ai.entrenchment == 0) {
+                    ai.mountedInTransport = true;
+                }
             }
 
             PgDatabase.HexCell curCell = scenario.grid[ai.col][ai.row];

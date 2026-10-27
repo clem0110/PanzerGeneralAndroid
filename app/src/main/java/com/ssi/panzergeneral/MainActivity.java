@@ -598,8 +598,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             tvSelectedTitle.setText(String.format(Locale.ROOT, "%s %s  |  Str: %d/%d (Sup:%d)  |  Exp: %d (%d★)  |  Ent: %d%s",
                     sideTag, def.name, u.strength, maxStr, u.suppression, u.experience, u.getStars(), u.entrenchment, trpTag));
 
-            String className = (def.unitClass >= 0 && def.unitClass < PgDatabase.CLASS_NAMES.length)
-                    ? PgDatabase.CLASS_NAMES[def.unitClass] : "Unit";
+            PgDatabase.UnitDef effDef = engine.getEffectiveUnitDef(u);
+            String className = (effDef.unitClass >= 0 && effDef.unitClass < PgDatabase.CLASS_NAMES.length)
+                    ? PgDatabase.CLASS_NAMES[effDef.unitClass] : "Unit";
             String supplyInfo = engine.supplyEnabled
                     ? String.format(Locale.ROOT, "Ammo:%d Fuel:%d", u.ammo, u.fuel)
                     : "Ammo:∞ Fuel:∞ (Supply OFF)";
@@ -607,9 +608,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             int maxMov = engine.getMaxMovementPoints(u);
             tvSelectedStats.setText(String.format(Locale.ROOT,
                     "%s • SA:%d HA:%d AA:%d GD:%d AD:%d CD:%d • Rng:%d Ini:%d Mov:%d/%d • %s • Hex(%d,%d) %s",
-                    className, def.softAttack, def.hardAttack, def.airAttack,
-                    def.groundDefense, def.airDefense, def.closeDefense,
-                    def.range, def.initiative, remMov, maxMov, supplyInfo,
+                    className, effDef.softAttack, effDef.hardAttack, effDef.airAttack,
+                    effDef.groundDefense, effDef.airDefense, effDef.closeDefense,
+                    effDef.range, effDef.initiative, remMov, maxMov, supplyInfo,
                     u.col, u.row, cell.name));
 
             boolean canAct = u.isAxis && engine.isPlayerTurn && !u.moved && u.movePointsUsed == 0 && !u.attacked;
@@ -1502,10 +1503,12 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         TextView tv = new TextView(this);
         tv.setPadding(24, 0, 0, 0);
         tv.setTextSize(13.5f);
-        String cls = (def.unitClass >= 0 && def.unitClass < PgDatabase.CLASS_NAMES.length)
-                ? PgDatabase.CLASS_NAMES[def.unitClass] : "Unit";
+        PgDatabase.UnitDef effDef = engine.getEffectiveUnitDef(u);
+        String cls = (effDef.unitClass >= 0 && effDef.unitClass < PgDatabase.CLASS_NAMES.length)
+                ? PgDatabase.CLASS_NAMES[effDef.unitClass] : "Unit";
         String specialRules = "";
-        if (def.unitClass == PgDatabase.CLASS_TANK) specialRules = "\n• Special: Tank Overrun (destroying weak unit with 0 losses grants bonus move & attack)";
+        if (u.mountedInTransport && u.transportDefId > 0) specialRules = "\n• Status: Mounted in Transport (" + effDef.name + "). Moving and attacking using transport stats.";
+        else if (def.unitClass == PgDatabase.CLASS_TANK) specialRules = "\n• Special: Tank Overrun (destroying weak unit with 0 losses grants bonus move & attack)";
         else if (def.isBridgeEngineer()) specialRules = "\n• Special: Bridge Engineer (forms pontoon bridge on River hexes; ignores Rugged Defense)";
         else if (def.isPioneerOrEngineer()) specialRules = "\n• Special: Combat Pioneer (ignores enemy Rugged Defense; strips 2x entrenchment)";
         else if (def.unitClass == PgDatabase.CLASS_RECON) specialRules = "\n• Special: Recon Phased Movement & High Spotting";
@@ -1526,8 +1529,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 engine.getRemainingMovementPoints(u), engine.getMaxMovementPoints(u),
                 engine.supplyEnabled ? String.valueOf(u.ammo) : "∞",
                 engine.supplyEnabled ? String.valueOf(u.fuel) : "∞",
-                def.softAttack, def.hardAttack, def.airAttack, def.navalAttack,
-                def.groundDefense, def.airDefense, def.closeDefense, def.initiative,
+                effDef.softAttack, effDef.hardAttack, effDef.airAttack, effDef.navalAttack,
+                effDef.groundDefense, effDef.airDefense, effDef.closeDefense, effDef.initiative,
                 specialRules));
         box.addView(tv);
 

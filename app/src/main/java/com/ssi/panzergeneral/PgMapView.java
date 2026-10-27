@@ -355,7 +355,7 @@ public class PgMapView extends View {
         if (selectedUnit != null && selectedUnit.isAxis && engine.isPlayerTurn) {
             for (PgDatabase.ActiveUnit target : validTargets) {
                 if (target.col == col && target.row == row) {
-                    PgDatabase.UnitDef aDef = engine.db.equipment.get(selectedUnit.unitDefId);
+                    PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(selectedUnit);
                     sounds.playCombatSound(aDef);
                     PgGameEngine.CombatReport rep = engine.executeCombat(selectedUnit, target);
                     triggerExplosion(col, row, rep);
