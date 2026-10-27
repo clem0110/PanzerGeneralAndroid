@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $projDir = $PSScriptRoot
+Set-Location $projDir
 
 if (-not $env:JAVA_HOME) {
     if (Test-Path "C:\Users\clem0\.jdks\openjdk-23.0.2") {

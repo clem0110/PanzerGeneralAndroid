@@ -286,7 +286,7 @@ public class PgMapView extends View {
                 }
             }
         }
-        if (tappedUnit != null && (!engine.fogOfWarEnabled || engine.visibleHexes[col][row] || tappedUnit.isAxis)) {
+        if (tappedUnit != null && engine.isUnitVisibleToPlayer(tappedUnit)) {
             sounds.playSelect();
             selectUnit(tappedUnit);
         } else {
@@ -464,6 +464,8 @@ public class PgMapView extends View {
 
                 PgDatabase.ActiveUnit groundUnit = engine.getUnitAt(c, r, false);
                 PgDatabase.ActiveUnit airUnit = engine.getUnitAt(c, r, true);
+                if (groundUnit != null && !engine.isUnitVisibleToPlayer(groundUnit)) groundUnit = null;
+                if (airUnit != null && !engine.isUnitVisibleToPlayer(airUnit)) airUnit = null;
 
                 if (groundUnit != null && airUnit != null) {
                     boolean groundSelected = (selectedUnit == groundUnit);
@@ -604,7 +606,8 @@ public class PgMapView extends View {
         textPaint.setColor(Color.WHITE);
         textPaint.setTextSize(17.5f);
         String extra = "";
-        if (rep.defenderSurrendered) extra += " [SURRENDERED!]";
+        if (rep.submarineDived) extra += " [SUB DIVED & EVADED!]";
+        else if (rep.defenderSurrendered) extra += " [SURRENDERED!]";
         else if (rep.defenderRetreated) extra += " [RETREATED]";
         if (rep.interceptorUnit != null) extra += " [INTERCEPTED]";
         else if (rep.supportUnit != null) extra += " [ARTY SUPPORT]";
@@ -666,7 +669,7 @@ public class PgMapView extends View {
 
         for (PgDatabase.ActiveUnit u : engine.units) {
             if (u.strength <= 0) continue;
-            if (engine.fogOfWarEnabled && !u.isAxis && !engine.visibleHexes[u.col][u.row]) continue;
+            if (!engine.isUnitVisibleToPlayer(u)) continue;
             float cx = startX + (u.col + 0.5f) * cellW;
             float cy = startY + (u.row + 0.5f) * cellW;
             badgePaint.setColor(u.isAxis ? 0xFFECEFF1 : 0xFFFF5252);

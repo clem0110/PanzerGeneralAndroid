@@ -44,6 +44,7 @@ public class PgGameEngine {
         public boolean ruggedDefense;
         public boolean overrun;
         public boolean surpriseContact;
+        public boolean submarineDived;
         public PgDatabase.ActiveUnit supportUnit;
         public PgDatabase.ActiveUnit interceptorUnit;
         public int targetCol, targetRow;
@@ -390,11 +391,36 @@ public class PgGameEngine {
         return getUnitAt(col, row, !preferAir);
     }
 
+    public boolean isUnitVisibleToPlayer(PgDatabase.ActiveUnit u) {
+        if (u == null || u.strength <= 0) return false;
+        if (!fogOfWarEnabled || u.isAxis) return true;
+        if (visibleHexes == null || !visibleHexes[u.col][u.row]) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def.unitClass == PgDatabase.CLASS_SUBMARINE) {
+            // Authentic Panzer General Rule (Strategy Guide p. 2484):
+            // Adjacent submarines are always spotted.
+            // At range > 1, 50% chance of remaining submerged/unseen unless an adjacent friendly unit exists.
+            boolean hasAdjacentFriendly = false;
+            for (int[] nb : getNeighbors(u.col, u.row)) {
+                PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
+                if (adj != null && adj.isAxis && adj.strength > 0) {
+                    hasAdjacentFriendly = true;
+                    break;
+                }
+            }
+            if (!hasAdjacentFriendly) {
+                int hash = (turn * 37 + u.instanceId * 23 + u.col * 7 + u.row) & 0x7FFFFFFF;
+                if ((hash % 100) >= 50) return false;
+            }
+        }
+        return true;
+    }
+
     public Set<Integer> getSpottedEnemyIds() {
         Set<Integer> set = new HashSet<>();
         if (scenario == null || visibleHexes == null) return set;
         for (PgDatabase.ActiveUnit u : units) {
-            if (!u.isAxis && u.strength > 0 && (!fogOfWarEnabled || visibleHexes[u.col][u.row])) {
+            if (!u.isAxis && u.strength > 0 && isUnitVisibleToPlayer(u)) {
                 set.add(u.instanceId);
             }
         }
@@ -644,7 +670,7 @@ public class PgGameEngine {
 
         for (PgDatabase.ActiveUnit u : units) {
             if (u.strength <= 0 || u.isAxis == attacker.isAxis) continue;
-            if (fogOfWarEnabled && !visibleHexes[u.col][u.row]) continue;
+            if (fogOfWarEnabled && !isUnitVisibleToPlayer(u)) continue;
             int dist = hexDistance(attacker.col, attacker.row, u.col, u.row);
             boolean dAir = isUnitOnAirLayer(u);
             boolean dNaval = u.inSeaTransport || db.equipment.get(u.unitDefId).isNaval();
@@ -686,6 +712,14 @@ public class PgGameEngine {
             return false;
         } else {
             // Target is on ground or sea
+            // Authentic ASW Rule (Chapter 4): Only Destroyers and Tactical Bombers can attack Submarines!
+            if (dDef.unitClass == PgDatabase.CLASS_SUBMARINE) {
+                if (aAir) {
+                    return aDef.unitClass == PgDatabase.CLASS_TAC_BOMBER && dist == 0;
+                } else {
+                    return aDef.unitClass == PgDatabase.CLASS_DESTROYER && dist == 1;
+                }
+            }
             if (aAir) {
                 // CRITICAL RULE: Planes can ONLY attack ground/naval units directly BENEATH them (dist == 0),
                 // and CANNOT attack ground units next to them (dist >= 1)
@@ -918,6 +952,9 @@ public class PgGameEngine {
         int def;
         if (isUnitOnAirLayer(attacker) || isUnitOnAirLayer(defender)) {
             def = dDef.airDefense;
+        } else if (aDef.unitClass == PgDatabase.CLASS_SUBMARINE && (dDef.isNaval() || defender.inSeaTransport)) {
+            // Authentic Torpedo Defense: ships defend against torpedoes using Close Defense
+            def = Math.max(1, dDef.closeDefense);
         } else {
             PgDatabase.HexCell cell = scenario.grid[defender.col][defender.row];
             boolean closeCombat = (cell.isCloseDefenseTerrain() && aDef.unitClass == PgDatabase.CLASS_INFANTRY && dDef.unitClass != PgDatabase.CLASS_INFANTRY)
@@ -1035,6 +1072,13 @@ public class PgGameEngine {
     public boolean canReturnFire(PgDatabase.ActiveUnit attacker, PgDatabase.UnitDef aDef,
                                  PgDatabase.ActiveUnit defender, PgDatabase.UnitDef dDef, int dist) {
         if (supplyEnabled && dDef.maxAmmo > 0 && defender.ammo <= 0) return false;
+        // Submarines: when submarine attacks, only Destroyers can return fire; Capital Ships, Carriers, Transports cannot return fire!
+        if (aDef.unitClass == PgDatabase.CLASS_SUBMARINE && dDef.unitClass != PgDatabase.CLASS_DESTROYER) {
+            return false;
+        }
+        if (dDef.unitClass == PgDatabase.CLASS_SUBMARINE && aDef.unitClass != PgDatabase.CLASS_DESTROYER) {
+            return false;
+        }
         if (dist > 1) {
             return aDef.unitClass == PgDatabase.CLASS_CAPITAL_SHIP && dDef.unitClass == PgDatabase.CLASS_CAPITAL_SHIP;
         }
@@ -1110,6 +1154,9 @@ public class PgGameEngine {
             if (aDef.unitClass == PgDatabase.CLASS_INFANTRY) aIni += 2;
             if (dDef.unitClass == PgDatabase.CLASS_INFANTRY) dIni += 2;
         }
+        if (aDef.unitClass == PgDatabase.CLASS_SUBMARINE) {
+            aIni += 99; // Submarines shoot first when attacking on their turn
+        }
 
         boolean aBomb = isBombardment(aDef, dist);
         boolean dBomb = isBombardment(dDef, dist);
@@ -1142,6 +1189,11 @@ public class PgGameEngine {
             if (defenderCanReturnFire) {
                 expAtkLosses = Math.min(attacker.strength, defStr * defPHit);
             }
+        }
+
+        if (dDef.unitClass == PgDatabase.CLASS_SUBMARINE) {
+            double evadeFactor = (aDef.unitClass == PgDatabase.CLASS_TAC_BOMBER) ? 0.25 : 0.50;
+            expDefLosses *= evadeFactor;
         }
 
         int expectedDefenderLosses = (int) Math.round(expDefLosses);
@@ -1236,6 +1288,17 @@ public class PgGameEngine {
         }
         rep.ruggedDefense = stiffDefense;
 
+        // Submarine Evasion by Diving (Strategy Guide Chapter 4: 50% vs DD, 75% vs Tac Bomber)
+        if (dDef.unitClass == PgDatabase.CLASS_SUBMARINE && !surpriseAmbush) {
+            int diveChance = (aDef.unitClass == PgDatabase.CLASS_TAC_BOMBER) ? 75 : 50;
+            if (rng.nextInt(100) < diveChance) {
+                rep.submarineDived = true;
+                attacker.attacked = true;
+                if (supplyEnabled && aDef.maxAmmo > 0) attacker.ammo = Math.max(0, attacker.ammo - 1);
+                return rep;
+            }
+        }
+
         // 4. Attack and Defense Grades per Strategy Guide Chapter 5
         int atkAttackGrade = getStrategyGuideAttackGrade(attacker, aDef, defender, dDef, dist, false);
         int defDefenseGrade = getStrategyGuideDefenseGrade(attacker, aDef, defender, dDef, dist, stiffDefense);
@@ -1264,6 +1327,9 @@ public class PgGameEngine {
         if (dist == 1 && defCell.isCloseDefenseTerrain()) {
             if (aDef.unitClass == PgDatabase.CLASS_INFANTRY) aIni += 2;
             if (dDef.unitClass == PgDatabase.CLASS_INFANTRY) dIni += 2;
+        }
+        if (aDef.unitClass == PgDatabase.CLASS_SUBMARINE) {
+            aIni += 99; // Submarines shoot first when attacking on their turn
         }
         if (stiffDefense) {
             dIni += 99; // Defender fires first in stiff defense
@@ -1804,12 +1870,81 @@ public class PgGameEngine {
         return u;
     }
 
+    public List<int[]> getAvailableAiDeployHexes() {
+        List<int[]> res = new ArrayList<>();
+        if (scenario == null) return res;
+        for (int c = 0; c < scenario.cols; c++) {
+            for (int r = 0; r < scenario.rows; r++) {
+                PgDatabase.HexCell cell = scenario.grid[c][r];
+                if ((cell.terrainType == 8 || cell.isSupplyPoint() || cell.isObjective)
+                        && cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, scenario)) {
+                    if (getUnitAt(c, r, false) == null) {
+                        res.add(new int[]{c, r});
+                    }
+                }
+            }
+        }
+        return res;
+    }
+
+    public PgDatabase.ActiveUnit purchaseAiUnit(int unitDefId, int col, int row) {
+        if (unitDefId <= 0 || unitDefId >= db.equipment.size()) return null;
+        PgDatabase.UnitDef def = db.equipment.get(unitDefId);
+        if (alliedPrestige < def.cost) return null;
+        if (getUnitAt(col, row, def.isAir()) != null) return null;
+
+        alliedPrestige -= def.cost;
+        int curId = nextInstanceId++;
+        int nat = (scenario.alliedNations != null && scenario.alliedNations.length > 0 && scenario.alliedNations[0] > 0)
+                ? scenario.alliedNations[0] : 16;
+        PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
+                .instanceId(curId)
+                .unitDefId(unitDefId)
+                .nation(nat)
+                .isAxis(false)
+                .isCore(false)
+                .col(col)
+                .row(row)
+                .strength(10)
+                .entrenchment(0)
+                .experience(0)
+                .fuel(def.maxFuel > 0 ? def.maxFuel : 99)
+                .ammo(def.maxAmmo > 0 ? def.maxAmmo : 99)
+                .movePointsUsed(0)
+                .moved(false)
+                .attacked(false)
+                .facingLeft(true)
+                .customTitle(curId + ". " + def.name)
+                .aiOrder(scenario.grid[col][row].isObjective ? 1 : 0)
+                .build();
+        units.add(u);
+        return u;
+    }
+
+    public boolean takeAiReplacements(PgDatabase.ActiveUnit u) {
+        if (u == null || u.strength >= 10 || alliedPrestige < 20) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        int needed = 10 - u.strength;
+        int costPerPoint = Math.max(5, def.cost / 15);
+        int cost = needed * costPerPoint;
+        if (alliedPrestige < cost) {
+            cost = alliedPrestige;
+            needed = Math.max(1, cost / costPerPoint);
+        }
+        alliedPrestige -= cost;
+        u.strength += needed;
+        u.moved = true;
+        u.attacked = true;
+        u.movePointsUsed = getMaxMovementPoints(u);
+        return true;
+    }
+
     public List<CombatReport> endPlayerTurnAndRunAi() {
         List<CombatReport> aiReports = new ArrayList<>();
         isPlayerTurn = false;
         lastUndoState = null;
 
-        // 1. Reset AI units & run AI turn
+        // Reset AI units & clear suppression
         for (PgDatabase.ActiveUnit u : units) {
             if (!u.isAxis && u.strength > 0) {
                 u.movePointsUsed = 0;
@@ -1827,32 +1962,160 @@ public class PgGameEngine {
             if (!u.isAxis && u.strength > 0) aiList.add(u);
         }
 
-        // First fire AI ranged artillery
+        // =========================================================================
+        // PHASE 1: Tactical Air Operations (Fighters intercept, Bombers suppress/strike)
+        // =========================================================================
         for (PgDatabase.ActiveUnit ai : aiList) {
-            if (ai.strength <= 0 || !units.contains(ai)) continue;
+            if (ai.strength <= 0 || !units.contains(ai) || ai.attacked) continue;
+            PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
+            if (!def.isAir()) continue;
+
+            List<PgDatabase.ActiveUnit> targets = getValidTargets(ai);
+            if (!targets.isEmpty()) {
+                targets.sort((t1, t2) -> {
+                    PgDatabase.UnitDef d1 = db.equipment.get(t1.unitDefId);
+                    PgDatabase.UnitDef d2 = db.equipment.get(t2.unitDefId);
+                    int p1 = (def.unitClass == PgDatabase.CLASS_FIGHTER && (d1.unitClass == PgDatabase.CLASS_LEVEL_BOMBER || d1.unitClass == PgDatabase.CLASS_TAC_BOMBER)) ? 10 : 0;
+                    int p2 = (def.unitClass == PgDatabase.CLASS_FIGHTER && (d2.unitClass == PgDatabase.CLASS_LEVEL_BOMBER || d2.unitClass == PgDatabase.CLASS_TAC_BOMBER)) ? 10 : 0;
+                    if (def.unitClass == PgDatabase.CLASS_LEVEL_BOMBER) {
+                        p1 += t1.entrenchment * 2 + (d1.unitClass == PgDatabase.CLASS_ARTILLERY ? 5 : 0);
+                        p2 += t2.entrenchment * 2 + (d2.unitClass == PgDatabase.CLASS_ARTILLERY ? 5 : 0);
+                    }
+                    return Integer.compare(p2, p1);
+                });
+                aiReports.add(executeCombat(ai, targets.get(0)));
+            } else if (!ai.moved) {
+                PgDatabase.ActiveUnit priorityTarget = null;
+                int bestDist = 999;
+                for (PgDatabase.ActiveUnit pUnit : units) {
+                    if (pUnit.isAxis && pUnit.strength > 0) {
+                        int d = hexDistance(ai.col, ai.row, pUnit.col, pUnit.row);
+                        if (d < bestDist && d <= def.movement) {
+                            bestDist = d;
+                            priorityTarget = pUnit;
+                        }
+                    }
+                }
+                if (priorityTarget != null) {
+                    Map<Integer, Integer> reach = getReachableHexes(ai);
+                    int bestC = ai.col, bestR = ai.row, minDist = bestDist;
+                    for (int key : reach.keySet()) {
+                        int mc = key % scenario.cols, mr = key / scenario.cols;
+                        int d = hexDistance(mc, mr, priorityTarget.col, priorityTarget.row);
+                        if (d < minDist) {
+                            minDist = d;
+                            bestC = mc;
+                            bestR = mr;
+                        }
+                    }
+                    if (bestC != ai.col || bestR != ai.row) {
+                        moveUnit(ai, bestC, bestR);
+                        List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
+                        if (!postTargets.isEmpty()) {
+                            aiReports.add(executeCombat(ai, postTargets.get(0)));
+                        }
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // PHASE 2: Ranged Artillery Bombardment (Strip entrenchment before assault)
+        // =========================================================================
+        for (PgDatabase.ActiveUnit ai : aiList) {
+            if (ai.strength <= 0 || !units.contains(ai) || ai.attacked) continue;
             PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
             if (def.range > 1) {
                 List<PgDatabase.ActiveUnit> targets = getValidTargets(ai);
                 if (!targets.isEmpty()) {
-                    targets.sort(Comparator.comparingInt(t -> hexDistance(ai.col, ai.row, t.col, t.row)));
+                    targets.sort((t1, t2) -> Integer.compare(t2.entrenchment, t1.entrenchment));
                     aiReports.add(executeCombat(ai, targets.get(0)));
                 }
             }
         }
 
-        // Next move and attack with remaining AI units
+        // =========================================================================
+        // PHASE 3: Submarine & Naval Combat
+        // =========================================================================
         for (PgDatabase.ActiveUnit ai : aiList) {
-            if (ai.strength <= 0 || !units.contains(ai)) continue;
+            if (ai.strength <= 0 || !units.contains(ai) || ai.attacked) continue;
+            PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
+            if (!def.isNaval()) continue;
+
+            List<PgDatabase.ActiveUnit> targets = getValidTargets(ai);
+            if (!targets.isEmpty()) {
+                if (def.unitClass == PgDatabase.CLASS_SUBMARINE) {
+                    targets.sort((t1, t2) -> {
+                        PgDatabase.UnitDef d1 = db.equipment.get(t1.unitDefId);
+                        PgDatabase.UnitDef d2 = db.equipment.get(t2.unitDefId);
+                        int p1 = (d1.unitClass == PgDatabase.CLASS_CAPITAL_SHIP || d1.unitClass == PgDatabase.CLASS_CARRIER) ? 10 : 0;
+                        int p2 = (d2.unitClass == PgDatabase.CLASS_CAPITAL_SHIP || d2.unitClass == PgDatabase.CLASS_CARRIER) ? 10 : 0;
+                        return Integer.compare(p2, p1);
+                    });
+                }
+                aiReports.add(executeCombat(ai, targets.get(0)));
+            }
+        }
+
+        // =========================================================================
+        // PHASE 4: Ground Assault & Tank Overrun Exploitation
+        // =========================================================================
+        for (PgDatabase.ActiveUnit ai : aiList) {
+            if (ai.strength <= 0 || !units.contains(ai) || ai.attacked) continue;
+            PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
+            if (def.isAir() || def.isNaval() || def.range > 1) {
+                if (ai.attacked) continue;
+            }
+
             PgDatabase.HexCell curCell = scenario.grid[ai.col][ai.row];
-            // If sitting on an objective, hold position and attack adjacent enemies
-            if (curCell.isObjective && ai.entrenchment >= 2) {
+
+            // 1. Static Guard Order: units holding an objective/fort hold position
+            if (ai.aiOrder == 1 && curCell.isObjective && ai.entrenchment >= 2) {
                 List<PgDatabase.ActiveUnit> targets = getValidTargets(ai);
                 if (!targets.isEmpty()) {
-                    aiReports.add(executeCombat(ai, targets.get(0)));
+                    CombatPrediction p = predictCombat(ai, targets.get(0));
+                    if (p.expectedDefenderLosses >= p.expectedAttackerLosses) {
+                        aiReports.add(executeCombat(ai, targets.get(0)));
+                    }
                 }
                 continue;
             }
 
+            // 2. Tactical Fallback: Depleted units (<= 4 str) pull back out of harm's way
+            if (ai.strength <= 4) {
+                boolean adjacentToEnemy = false;
+                for (int[] nb : getNeighbors(ai.col, ai.row)) {
+                    PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
+                    if (adj != null && adj.isAxis && adj.strength > 0) {
+                        adjacentToEnemy = true;
+                        break;
+                    }
+                }
+                if (adjacentToEnemy) {
+                    Map<Integer, Integer> reach = getReachableHexes(ai);
+                    int safeC = ai.col, safeR = ai.row, maxEnemyDist = 0;
+                    for (int key : reach.keySet()) {
+                        int mc = key % scenario.cols, mr = key / scenario.cols;
+                        int minD = 99;
+                        for (PgDatabase.ActiveUnit enemy : units) {
+                            if (enemy.isAxis && enemy.strength > 0) {
+                                minD = Math.min(minD, hexDistance(mc, mr, enemy.col, enemy.row));
+                            }
+                        }
+                        if (minD > maxEnemyDist) {
+                            maxEnemyDist = minD;
+                            safeC = mc;
+                            safeR = mr;
+                        }
+                    }
+                    if (safeC != ai.col || safeR != ai.row) {
+                        moveUnit(ai, safeC, safeR);
+                    }
+                }
+                continue;
+            }
+
+            // 3. Immediate favorable attack
             List<PgDatabase.ActiveUnit> immediateTargets = getValidTargets(ai);
             if (!immediateTargets.isEmpty()) {
                 PgDatabase.ActiveUnit bestTarget = null;
@@ -1864,12 +2127,19 @@ public class PgGameEngine {
                     }
                 }
                 if (bestTarget != null) {
-                    aiReports.add(executeCombat(ai, bestTarget));
+                    CombatReport rep = executeCombat(ai, bestTarget);
+                    aiReports.add(rep);
+                    if (rep.overrun && ai.strength > 0 && !ai.attacked) {
+                        List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
+                        if (!overrunTargets.isEmpty()) {
+                            aiReports.add(executeCombat(ai, overrunTargets.get(0)));
+                        }
+                    }
                     continue;
                 }
             }
 
-            // Move toward nearest Axis unit or threatened objective
+            // 4. Advance towards nearest enemy or threatened objective
             PgDatabase.ActiveUnit nearestEnemy = null;
             int bestDist = 999;
             for (PgDatabase.ActiveUnit pUnit : units) {
@@ -1881,7 +2151,7 @@ public class PgGameEngine {
                     }
                 }
             }
-            if (nearestEnemy != null && bestDist <= 8) {
+            if (nearestEnemy != null && bestDist <= 8 && !ai.moved) {
                 Map<Integer, Integer> reach = getReachableHexes(ai);
                 int bestMoveCol = ai.col, bestMoveRow = ai.row;
                 int minTargetDist = bestDist;
@@ -1901,9 +2171,61 @@ public class PgGameEngine {
                     if (!postMoveTargets.isEmpty()) {
                         CombatPrediction p = predictCombat(ai, postMoveTargets.get(0));
                         if (p.expectedDefenderLosses >= p.expectedAttackerLosses) {
-                            aiReports.add(executeCombat(ai, postMoveTargets.get(0)));
+                            CombatReport rep = executeCombat(ai, postMoveTargets.get(0));
+                            aiReports.add(rep);
+                            if (rep.overrun && ai.strength > 0 && !ai.attacked) {
+                                List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
+                                if (!overrunTargets.isEmpty()) {
+                                    aiReports.add(executeCombat(ai, overrunTargets.get(0)));
+                                }
+                            }
                         }
                     }
+                }
+            }
+        }
+
+        // =========================================================================
+        // PHASE 5: Replacements for Safe Wounded AI Units (Strategy Guide pp. 991-995)
+        // =========================================================================
+        for (PgDatabase.ActiveUnit ai : aiList) {
+            if (ai.strength > 0 && ai.strength <= 6 && !ai.attacked && alliedPrestige >= 30) {
+                PgDatabase.HexCell cell = scenario.grid[ai.col][ai.row];
+                boolean isSupply = cell.isSupplyPoint() || cell.isObjective || cell.terrainType == 8;
+                boolean safeFromEnemy = true;
+                for (int[] nb : getNeighbors(ai.col, ai.row)) {
+                    PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
+                    if (adj != null && adj.isAxis && adj.strength > 0) {
+                        safeFromEnemy = false;
+                        break;
+                    }
+                }
+                if (isSupply || safeFromEnemy) {
+                    takeAiReplacements(ai);
+                }
+            }
+        }
+
+        // =========================================================================
+        // PHASE 6: AI Reinforcements / Prestige Spending
+        // =========================================================================
+        if (alliedPrestige >= 150) {
+            List<int[]> deploySpots = getAvailableAiDeployHexes();
+            if (!deploySpots.isEmpty()) {
+                int chosenDefId = -1;
+                for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
+                    if (!u.isAxis && u.unitDefId > 0 && u.unitDefId < db.equipment.size()) {
+                        PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
+                        if (!d.isAir() && !d.isNaval() && d.cost <= alliedPrestige) {
+                            if (chosenDefId == -1 || d.cost > db.equipment.get(chosenDefId).cost) {
+                                chosenDefId = u.unitDefId;
+                            }
+                        }
+                    }
+                }
+                if (chosenDefId > 0) {
+                    int[] spot = deploySpots.get(0);
+                    purchaseAiUnit(chosenDefId, spot[0], spot[1]);
                 }
             }
         }

@@ -246,6 +246,7 @@ public class PgDatabase {
         public boolean inAirTransport;
         public boolean facingLeft;
         public String customTitle;
+        public int aiOrder; // 0 = hunter/maneuver, 1 = hold objective/hex, 2 = patrol
 
         public int getStars() {
             return Math.min(5, experience / 100);
@@ -622,6 +623,10 @@ public class PgDatabase {
             int currentInstId = instId++;
             HexCell startCell = sd.grid[c][r];
             boolean inSea = !def.isAir() && !def.isNaval() && startCell.isWater();
+            int aiOrder = 0;
+            if (startCell.isObjective || (startCell.isSupplyPoint() && ent >= 2)) {
+                aiOrder = 1; // Authentic SSI Stance: Hold position / Static Guard
+            }
 
             ActiveUnit u = ActiveUnit.builder()
                     .instanceId(currentInstId)
@@ -640,6 +645,7 @@ public class PgDatabase {
                     .facingLeft(!isAxis)
                     .customTitle(currentInstId + ". " + def.name)
                     .inSeaTransport(inSea)
+                    .aiOrder(aiOrder)
                     .build();
 
             sd.initialUnits.add(u);
