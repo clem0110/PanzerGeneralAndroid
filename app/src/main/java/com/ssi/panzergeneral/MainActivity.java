@@ -732,6 +732,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         mapView.clearSelection();
         refreshHud();
         checkScenarioCompletion();
+        if (engine.scenarioOutcome == 0 && engine.isPlayerTurn && engine.scenario != null) {
+            sounds.playSelect();
+            mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
+            Toast.makeText(this, "★ YOUR TURN! Turn " + engine.turn + " of " + engine.maxTurns + " ★", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void checkScenarioCompletion() {
@@ -814,7 +819,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
               .append(" (").append(oc[0]).append(",").append(oc[1]).append(")");
         }
         b.setMessage(sb.toString());
-        b.setPositiveButton("Begin Operation", (d, w) -> sounds.stopVoice());
+        b.setPositiveButton("Begin Operation", (d, w) -> {
+            sounds.stopVoice();
+            sounds.playSelect();
+            if (engine.scenario != null) {
+                mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
+            }
+        });
         b.setOnDismissListener(d -> sounds.stopVoice());
         b.show();
     }

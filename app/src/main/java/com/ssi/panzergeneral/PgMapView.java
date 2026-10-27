@@ -60,6 +60,11 @@ public class PgMapView extends View {
     private PgGameEngine.CombatReport lastCombatBanner = null;
     private long bannerExpireTime = 0;
 
+    // Turn banner state
+    private String turnBannerTitle = null;
+    private String turnBannerSubtitle = null;
+    private long turnBannerExpireTime = 0;
+
     private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint hexStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint highlightFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -191,6 +196,13 @@ public class PgMapView extends View {
         return super.onGenericMotionEvent(event);
     }
 
+    public void showYourTurnBanner(int currentTurn, int maxTurns, String weatherLabel) {
+        this.turnBannerTitle = String.format(Locale.ROOT, "★ YOUR TURN — TURN %d / %d ★", currentTurn, maxTurns);
+        this.turnBannerSubtitle = "Axis Forces Ready For Orders • " + (weatherLabel != null ? weatherLabel : "Clear / Dry");
+        this.turnBannerExpireTime = System.currentTimeMillis() + 3800;
+        invalidate();
+    }
+
     private boolean handleZoomControlTap(float x, float y) {
         if (strategicMapOverlay) return false;
         if (btnZoomInRect.contains(x, y)) {
@@ -319,6 +331,11 @@ public class PgMapView extends View {
 
     private void handleTap(float screenX, float screenY) {
         if (engine.scenario == null) return;
+
+        if (turnBannerTitle != null && System.currentTimeMillis() < turnBannerExpireTime) {
+            turnBannerExpireTime = 0;
+            invalidate();
+        }
 
         if (strategicMapOverlay) {
             // Tap on strategic map jumps camera to tapped hex
@@ -666,6 +683,12 @@ public class PgMapView extends View {
             drawCombatBanner(canvas, lastCombatBanner);
             postInvalidateDelayed(250);
         }
+
+        // Draw Your Turn banner if active
+        if (turnBannerTitle != null && System.currentTimeMillis() < turnBannerExpireTime) {
+            drawYourTurnBanner(canvas);
+            postInvalidateDelayed(150);
+        }
     }
 
     private void drawSingleUnit(Canvas canvas, PgDatabase.ActiveUnit u, float x, float y, boolean dimmed) {
@@ -743,6 +766,43 @@ public class PgMapView extends View {
                 rep.defenderLosses, rep.defenderDestroyed && !rep.defenderSurrendered ? " (DESTROYED)" : "",
                 extra);
         canvas.drawText(detail, bx + bw * 0.5f, by + 57f, textPaint);
+    }
+
+    private void drawYourTurnBanner(Canvas canvas) {
+        float bw = Math.min(680f, getWidth() * 0.85f);
+        float bh = 94f;
+        float bx = (getWidth() - bw) * 0.5f;
+        float by = Math.max(90f, (getHeight() - bh) * 0.36f);
+
+        RectF r = new RectF(bx, by, bx + bw, by + bh);
+
+        // Dark translucent tactical panel
+        badgePaint.setColor(0xF2162018);
+        canvas.drawRoundRect(r, 14f, 14f, badgePaint);
+
+        // Gold border with inner accent
+        hexStrokePaint.setColor(0xFFFFD54F);
+        hexStrokePaint.setStrokeWidth(2.6f);
+        canvas.drawRoundRect(r, 14f, 14f, hexStrokePaint);
+
+        RectF inner = new RectF(bx + 4f, by + 4f, bx + bw - 4f, by + bh - 4f);
+        hexStrokePaint.setColor(0x80C5A059);
+        hexStrokePaint.setStrokeWidth(1.2f);
+        canvas.drawRoundRect(inner, 10f, 10f, hexStrokePaint);
+
+        // Title: Gleaming Gold with shadow
+        textPaint.setColor(0xFFFFD54F);
+        textPaint.setTextSize(26f);
+        textPaint.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        textPaint.setShadowLayer(3.5f, 1.5f, 1.5f, Color.BLACK);
+        canvas.drawText(turnBannerTitle, bx + bw * 0.5f, by + 42f, textPaint);
+
+        // Subtitle: Off-white tactical status
+        textPaint.setColor(0xFFECEFF1);
+        textPaint.setTextSize(16f);
+        textPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        textPaint.setShadowLayer(2f, 1f, 1f, Color.BLACK);
+        canvas.drawText(turnBannerSubtitle, bx + bw * 0.5f, by + 74f, textPaint);
     }
 
     private void drawStrategicMap(Canvas canvas) {
