@@ -339,6 +339,7 @@ public class PgMapView extends View {
 
     private void handleTap(float screenX, float screenY) {
         if (engine.scenario == null) return;
+        if (!engine.isPlayerTurn) return;
 
         if (turnBannerTitle != null && System.currentTimeMillis() < turnBannerExpireTime) {
             turnBannerExpireTime = 0;
@@ -738,6 +739,9 @@ public class PgMapView extends View {
         if (lastCombatBanner != null && System.currentTimeMillis() < bannerExpireTime) {
             drawCombatBanner(canvas, lastCombatBanner);
             postInvalidateDelayed(250);
+        } else if (!engine.isPlayerTurn && !strategicMapOverlay) {
+            drawEnemyTurnBanner(canvas);
+            postInvalidateDelayed(250);
         }
 
         // Draw Your Turn banner if active
@@ -859,6 +863,27 @@ public class PgMapView extends View {
         textPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         textPaint.setShadowLayer(2f, 1f, 1f, Color.BLACK);
         canvas.drawText(turnBannerSubtitle, bx + bw * 0.5f, by + 74f, textPaint);
+    }
+
+    private void drawEnemyTurnBanner(Canvas canvas) {
+        float bw = Math.min(540f, getWidth() * 0.85f);
+        float bh = 46f;
+        float bx = (getWidth() - bw) * 0.5f;
+        float by = 60f;
+
+        RectF r = new RectF(bx, by, bx + bw, by + bh);
+        badgePaint.setColor(0xEE2A0A0A);
+        canvas.drawRoundRect(r, 10f, 10f, badgePaint);
+
+        hexStrokePaint.setColor(0xFFE53935);
+        hexStrokePaint.setStrokeWidth(2.2f);
+        canvas.drawRoundRect(r, 10f, 10f, hexStrokePaint);
+
+        textPaint.setColor(0xFFFFCDD2);
+        textPaint.setTextSize(20f);
+        textPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        textPaint.setShadowLayer(3f, 1f, 1f, Color.BLACK);
+        canvas.drawText("\u2605 ALLIED TURN IN PROGRESS \u2605", bx + bw * 0.5f, by + 31f, textPaint);
     }
 
     private void drawStrategicMap(Canvas canvas) {

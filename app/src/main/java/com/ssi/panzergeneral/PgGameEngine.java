@@ -2477,7 +2477,16 @@ public class PgGameEngine {
         }
     }
 
+    public interface AiTurnCallback {
+        void onAiUnitMoved(PgDatabase.ActiveUnit unit, int fromCol, int fromRow, int toCol, int toRow);
+        void onAiCombatExecuted(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, CombatReport report);
+    }
+
     public List<CombatReport> endPlayerTurnAndRunAi() {
+        return endPlayerTurnAndRunAi(null);
+    }
+
+    public List<CombatReport> endPlayerTurnAndRunAi(AiTurnCallback callback) {
         List<CombatReport> aiReports = new ArrayList<>();
         isPlayerTurn = false;
         lastUndoState = null;
@@ -2544,7 +2553,9 @@ public class PgGameEngine {
                 if (!targets.isEmpty()) {
                     PgDatabase.ActiveUnit best = pickBestAiTarget(ai, targets);
                     if (best != null) {
-                        aiReports.add(executeCombat(ai, best));
+                        CombatReport rep = executeCombat(ai, best);
+                        aiReports.add(rep);
+                        if (callback != null) callback.onAiCombatExecuted(ai, best, rep);
                     }
                 }
             }
@@ -2586,7 +2597,10 @@ public class PgGameEngine {
                         }
                     }
                     if (moveC != ai.col || moveR != ai.row) {
-                        moveUnit(ai, moveC, moveR);
+                        int origC = ai.col, origR = ai.row;
+                        if (moveUnit(ai, moveC, moveR)) {
+                            if (callback != null) callback.onAiUnitMoved(ai, origC, origR, moveC, moveR);
+                        }
                         continue;
                     }
                 }
@@ -2598,7 +2612,9 @@ public class PgGameEngine {
                 if (!immediateTargets.isEmpty()) {
                     PgDatabase.ActiveUnit best = pickBestAiTarget(ai, immediateTargets);
                     if (best != null) {
-                        aiReports.add(executeCombat(ai, best));
+                        CombatReport rep = executeCombat(ai, best);
+                        aiReports.add(rep);
+                        if (callback != null) callback.onAiCombatExecuted(ai, best, rep);
                         continue;
                     }
                 }
@@ -2649,12 +2665,17 @@ public class PgGameEngine {
                             }
                         }
                         if (bestC != ai.col || bestR != ai.row) {
-                            moveUnit(ai, bestC, bestR);
-                            List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
-                            if (!postTargets.isEmpty()) {
-                                PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postTargets);
-                                if (postBest != null) {
-                                    aiReports.add(executeCombat(ai, postBest));
+                            int origC = ai.col, origR = ai.row;
+                            if (moveUnit(ai, bestC, bestR)) {
+                                if (callback != null) callback.onAiUnitMoved(ai, origC, origR, bestC, bestR);
+                                List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
+                                if (!postTargets.isEmpty()) {
+                                    PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postTargets);
+                                    if (postBest != null) {
+                                        CombatReport rep = executeCombat(ai, postBest);
+                                        aiReports.add(rep);
+                                        if (callback != null) callback.onAiCombatExecuted(ai, postBest, rep);
+                                    }
                                 }
                             }
                         }
@@ -2666,7 +2687,9 @@ public class PgGameEngine {
                 if (!immediateTargets.isEmpty()) {
                     PgDatabase.ActiveUnit best = pickBestAiTarget(ai, immediateTargets);
                     if (best != null) {
-                        aiReports.add(executeCombat(ai, best));
+                        CombatReport rep = executeCombat(ai, best);
+                        aiReports.add(rep);
+                        if (callback != null) callback.onAiCombatExecuted(ai, best, rep);
                         continue;
                     }
                 }
@@ -2704,12 +2727,17 @@ public class PgGameEngine {
                             }
                         }
                         if (bestC != ai.col || bestR != ai.row) {
-                            moveUnit(ai, bestC, bestR);
-                            List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
-                            if (!postTargets.isEmpty()) {
-                                PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postTargets);
-                                if (postBest != null) {
-                                    aiReports.add(executeCombat(ai, postBest));
+                            int origC = ai.col, origR = ai.row;
+                            if (moveUnit(ai, bestC, bestR)) {
+                                if (callback != null) callback.onAiUnitMoved(ai, origC, origR, bestC, bestR);
+                                List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
+                                if (!postTargets.isEmpty()) {
+                                    PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postTargets);
+                                    if (postBest != null) {
+                                        CombatReport rep = executeCombat(ai, postBest);
+                                        aiReports.add(rep);
+                                        if (callback != null) callback.onAiCombatExecuted(ai, postBest, rep);
+                                    }
                                 }
                             }
                         }
@@ -2735,7 +2763,9 @@ public class PgGameEngine {
                         double sc = evaluateAiAttackScore(ai, best);
                         // Only attack from the objective if exchange is favorable or defender is low strength
                         if (sc >= 0 || best.strength <= 3) {
-                            aiReports.add(executeCombat(ai, best));
+                            CombatReport rep = executeCombat(ai, best);
+                            aiReports.add(rep);
+                            if (callback != null) callback.onAiCombatExecuted(ai, best, rep);
                         }
                     }
                 }
@@ -2802,12 +2832,17 @@ public class PgGameEngine {
                     }
 
                     if (bestC != ai.col || bestR != ai.row) {
-                        moveUnit(ai, bestC, bestR);
-                        List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
-                        if (!postTargets.isEmpty()) {
-                            PgDatabase.ActiveUnit best = pickBestAiTarget(ai, postTargets);
-                            if (best != null) {
-                                aiReports.add(executeCombat(ai, best));
+                        int origC = ai.col, origR = ai.row;
+                        if (moveUnit(ai, bestC, bestR)) {
+                            if (callback != null) callback.onAiUnitMoved(ai, origC, origR, bestC, bestR);
+                            List<PgDatabase.ActiveUnit> postTargets = getValidTargets(ai);
+                            if (!postTargets.isEmpty()) {
+                                PgDatabase.ActiveUnit best = pickBestAiTarget(ai, postTargets);
+                                if (best != null) {
+                                    CombatReport rep = executeCombat(ai, best);
+                                    aiReports.add(rep);
+                                    if (callback != null) callback.onAiCombatExecuted(ai, best, rep);
+                                }
                             }
                         }
                     }
@@ -2823,7 +2858,7 @@ public class PgGameEngine {
             PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
             if (def.isAir() || def.isNaval() || def.range > 1 || scenario == null) continue;
             if (def.unitClass == PgDatabase.CLASS_TANK || def.unitClass == PgDatabase.CLASS_ANTI_TANK) {
-                executeAiMobileGroundAssault(ai, aiReports, capturableAxisObjectives, threatenedAlliedObjectives);
+                executeAiMobileGroundAssault(ai, aiReports, capturableAxisObjectives, threatenedAlliedObjectives, callback);
             }
         }
 
@@ -2835,7 +2870,7 @@ public class PgGameEngine {
             PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
             if (def.isAir() || def.isNaval() || def.range > 1 || scenario == null) continue;
             if (def.unitClass != PgDatabase.CLASS_TANK && def.unitClass != PgDatabase.CLASS_ANTI_TANK) {
-                executeAiMobileGroundAssault(ai, aiReports, capturableAxisObjectives, threatenedAlliedObjectives);
+                executeAiMobileGroundAssault(ai, aiReports, capturableAxisObjectives, threatenedAlliedObjectives, callback);
             }
         }
 
@@ -2881,7 +2916,10 @@ public class PgGameEngine {
                     }
                 }
                 if (bestC != ai.col || bestR != ai.row) {
-                    moveUnit(ai, bestC, bestR);
+                    int origC = ai.col, origR = ai.row;
+                    if (moveUnit(ai, bestC, bestR)) {
+                        if (callback != null) callback.onAiUnitMoved(ai, origC, origR, bestC, bestR);
+                    }
                 }
             }
         }
@@ -3030,7 +3068,8 @@ public class PgGameEngine {
 
     private void executeAiMobileGroundAssault(PgDatabase.ActiveUnit ai, List<CombatReport> aiReports,
                                              List<PgDatabase.HexCell> capturableAxisObjectives,
-                                             List<PgDatabase.HexCell> threatenedAlliedObjectives) {
+                                             List<PgDatabase.HexCell> threatenedAlliedObjectives,
+                                             AiTurnCallback callback) {
         if (ai.strength <= 0 || !units.contains(ai) || ai.attacked) return;
         PgDatabase.UnitDef def = db.equipment.get(ai.unitDefId);
         if (def.isAir() || def.isNaval() || def.range > 1 || scenario == null) return;
@@ -3060,12 +3099,15 @@ public class PgGameEngine {
                 if (sc >= 0 || best.strength <= 3) {
                     CombatReport rep = executeCombat(ai, best);
                     aiReports.add(rep);
+                    if (callback != null) callback.onAiCombatExecuted(ai, best, rep);
                     if (rep.overrun && ai.strength > 0 && !ai.attacked) {
                         List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
                         if (!overrunTargets.isEmpty()) {
                             PgDatabase.ActiveUnit overBest = pickBestAiTarget(ai, overrunTargets);
                             if (overBest != null) {
-                                aiReports.add(executeCombat(ai, overBest));
+                                CombatReport oRep = executeCombat(ai, overBest);
+                                aiReports.add(oRep);
+                                if (callback != null) callback.onAiCombatExecuted(ai, overBest, oRep);
                             }
                         }
                     }
@@ -3180,19 +3222,25 @@ public class PgGameEngine {
             }
 
             if (bestMoveCol != ai.col || bestMoveRow != ai.row) {
-                moveUnit(ai, bestMoveCol, bestMoveRow);
-                List<PgDatabase.ActiveUnit> postMoveTargets = getValidTargets(ai);
-                if (!postMoveTargets.isEmpty()) {
-                    PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postMoveTargets);
-                    if (postBest != null) {
-                        CombatReport rep = executeCombat(ai, postBest);
-                        aiReports.add(rep);
-                        if (rep.overrun && ai.strength > 0 && !ai.attacked) {
-                            List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
-                            if (!overrunTargets.isEmpty()) {
-                                PgDatabase.ActiveUnit overBest = pickBestAiTarget(ai, overrunTargets);
-                                if (overBest != null) {
-                                    aiReports.add(executeCombat(ai, overBest));
+                int origC = ai.col, origR = ai.row;
+                if (moveUnit(ai, bestMoveCol, bestMoveRow)) {
+                    if (callback != null) callback.onAiUnitMoved(ai, origC, origR, bestMoveCol, bestMoveRow);
+                    List<PgDatabase.ActiveUnit> postMoveTargets = getValidTargets(ai);
+                    if (!postMoveTargets.isEmpty()) {
+                        PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postMoveTargets);
+                        if (postBest != null) {
+                            CombatReport rep = executeCombat(ai, postBest);
+                            aiReports.add(rep);
+                            if (callback != null) callback.onAiCombatExecuted(ai, postBest, rep);
+                            if (rep.overrun && ai.strength > 0 && !ai.attacked) {
+                                List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
+                                if (!overrunTargets.isEmpty()) {
+                                    PgDatabase.ActiveUnit overBest = pickBestAiTarget(ai, overrunTargets);
+                                    if (overBest != null) {
+                                        CombatReport oRep = executeCombat(ai, overBest);
+                                        aiReports.add(oRep);
+                                        if (callback != null) callback.onAiCombatExecuted(ai, overBest, oRep);
+                                    }
                                 }
                             }
                         }

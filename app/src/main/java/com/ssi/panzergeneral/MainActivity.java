@@ -50,6 +50,20 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     private Button btnPurchase;
     private Button btnNextUnit;
     private Button btnEndTurn;
+    private volatile boolean isAiTurnRunning = false;
+
+    private void setHudControlsEnabled(boolean enabled) {
+        if (btnEndTurn != null) btnEndTurn.setEnabled(enabled);
+        if (btnNextUnit != null) btnNextUnit.setEnabled(enabled);
+        if (btnPurchase != null) btnPurchase.setEnabled(enabled);
+        if (btnUndo != null) btnUndo.setEnabled(enabled);
+        if (btnSupply != null) btnSupply.setEnabled(enabled);
+        if (btnReinforce != null) btnReinforce.setEnabled(enabled);
+        if (btnElite != null) btnElite.setEnabled(enabled);
+        if (btnUpgrade != null) btnUpgrade.setEnabled(enabled);
+        if (btnMount != null) btnMount.setEnabled(enabled);
+        if (btnAirToggle != null) btnAirToggle.setEnabled(enabled);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -461,6 +475,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         btnNextUnit = createCompactButton("NEXT", 0xFF283593);
         btnNextUnit.setOnClickListener(v -> {
             sounds.playClick();
+            if (isAiTurnRunning) return;
             if (engine.isDeploymentPhase) {
                 showCoreDeploymentDialog();
             } else {
@@ -592,7 +607,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         tvScenarioTitle.setText(String.format(Locale.ROOT, "#%d %s (%s)",
                 m.number, m.fullTitle, engine.isCampaignMode ? "Campaign" : "Scenario"));
 
-        if (engine.isDeploymentPhase) {
+        if (isAiTurnRunning) {
+            tvTurnWeather.setText(String.format(Locale.ROOT, "\u2605 ALLIED TURN IN PROGRESS (Turn %d/%d) \u2605", engine.turn, engine.maxTurns));
+            btnNextUnit.setText("WAIT");
+            btnNextUnit.setBackgroundColor(0xFF37474F);
+            btnEndTurn.setText("ALLIED TURN");
+            btnEndTurn.setBackgroundColor(0xFF8E2424);
+        } else if (engine.isDeploymentPhase) {
             tvTurnWeather.setText(String.format(Locale.ROOT, "★ DEPLOYMENT PHASE ★ • %d in Reserve", engine.unplacedCoreUnits.size()));
             btnNextUnit.setText("RESERVES (" + engine.unplacedCoreUnits.size() + ")");
             btnNextUnit.setBackgroundColor(0xFFF57F17);
@@ -622,6 +643,28 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void updateUnitInspector(int col, int row, PgDatabase.ActiveUnit u) {
+        if (isAiTurnRunning) {
+            setHudControlsEnabled(false);
+            if (u != null) {
+                PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+                Bitmap bmp = assets.getSprite("TACICONS.SHP", engine.getEffectiveIconId(u), u.facingLeft);
+                ivSelectedUnitIcon.setImageBitmap(bmp);
+                PgDatabase.HexCell cell = (engine.scenario != null && u.col >= 0 && u.col < engine.scenario.cols && u.row >= 0 && u.row < engine.scenario.rows)
+                        ? engine.scenario.grid[u.col][u.row] : null;
+                String sideTag = u.isAxis ? (u.isCore ? "[AXIS CORE]" : "[AXIS AUX]") : "[ALLIED]";
+                int maxStr = u.getMaxOverstrength();
+                tvSelectedTitle.setText(String.format(Locale.ROOT, "%s %s  |  Str: %d/%d (Sup:%d)  |  Exp: %d (%dâ˜…)",
+                        sideTag, def.name, u.strength, maxStr, u.suppression, u.experience, u.getStars()));
+                PgDatabase.UnitDef effDef = engine.getEffectiveUnitDef(u);
+                String hexPosStr = cell != null ? String.format(Locale.ROOT, "Hex(%d,%d) %s", u.col, u.row, cell.name) : "";
+                tvSelectedStats.setText(String.format(Locale.ROOT,
+                        "SA:%d HA:%d AA:%d GD:%d AD:%d CD:%d â€¢ Rng:%d Ini:%d â€¢ %s",
+                        effDef.softAttack, effDef.hardAttack, effDef.airAttack,
+                        effDef.groundDefense, effDef.airDefense, effDef.closeDefense,
+                        effDef.range, effDef.initiative, hexPosStr));
+            }
+            return;
+        }
         btnUndo.setEnabled(engine.canUndoLastMove());
         if (u != null) {
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
@@ -1160,21 +1203,84 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void performEndTurn() {
+        if (isAiTurnRunning) return;
         mapView.purchasePlacementMode = false;
-        List<PgGameEngine.CombatReport> aiReports = engine.endPlayerTurnAndRunAi();
-        if (!aiReports.isEmpty()) {
-            PgGameEngine.CombatReport last = aiReports.get(aiReports.size() - 1);
-            sounds.playCombatSound(null);
-            mapView.triggerExplosion(last.targetCol, last.targetRow, last);
-        }
         mapView.clearSelection();
-        refreshHud();
-        checkScenarioCompletion();
-        if (engine.scenarioOutcome == 0 && engine.isPlayerTurn && engine.scenario != null) {
-            sounds.playSelect();
-            mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
-            Toast.makeText(this, "★ YOUR TURN! Turn " + engine.turn + " of " + engine.maxTurns + " ★", Toast.LENGTH_SHORT).show();
-        }
+        isAiTurnRunning = true;
+        setHudControlsEnabled(false);
+        tvTurnWeather.setText(String.format(Locale.ROOT, "\u2605 ALLIED TURN IN PROGRESS (Turn %d/%d) \u2605", engine.turn, engine.maxTurns));
+
+        new Thread(() -> {
+            try {
+                Thread.sleep(300);
+
+                engine.endPlayerTurnAndRunAi(new PgGameEngine.AiTurnCallback() {
+                    @Override
+                    public void onAiUnitMoved(PgDatabase.ActiveUnit unit, int fromCol, int fromRow, int toCol, int toRow) {
+                        boolean wasVis = fromCol >= 0 && fromRow >= 0 && engine.visibleHexes != null && fromCol < engine.scenario.cols && fromRow < engine.scenario.rows && engine.visibleHexes[fromCol][fromRow];
+                        boolean nowVis = toCol >= 0 && toRow >= 0 && engine.visibleHexes != null && toCol < engine.scenario.cols && toRow < engine.scenario.rows && engine.visibleHexes[toCol][toRow];
+
+                        if (wasVis || nowVis) {
+                            if (!isFinishing() && !isDestroyed()) {
+                                runOnUiThread(() -> {
+                                    mapView.centerOnHex(toCol, toRow);
+                                    mapView.selectUnit(unit);
+                                    PgDatabase.UnitDef def = db.equipment.get(unit.unitDefId);
+                                    sounds.playMoveSound(def);
+                                    refreshHud();
+                                    mapView.invalidate();
+                                });
+                            }
+                            try {
+                                Thread.sleep(380);
+                            } catch (InterruptedException ignored) {}
+                        }
+                    }
+
+                    @Override
+                    public void onAiCombatExecuted(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, PgGameEngine.CombatReport report) {
+                        boolean tVis = report.targetCol >= 0 && report.targetRow >= 0 && engine.visibleHexes != null && report.targetCol < engine.scenario.cols && report.targetRow < engine.scenario.rows && engine.visibleHexes[report.targetCol][report.targetRow];
+                        boolean involvesAxis = (defender != null && defender.isAxis) || (attacker != null && attacker.isAxis);
+
+                        if (tVis || involvesAxis) {
+                            if (!isFinishing() && !isDestroyed()) {
+                                runOnUiThread(() -> {
+                                    mapView.centerOnHex(report.targetCol, report.targetRow);
+                                    mapView.selectUnit(attacker);
+                                    PgDatabase.UnitDef aDef = attacker != null ? db.equipment.get(attacker.unitDefId) : null;
+                                    sounds.playCombatSound(aDef);
+                                    mapView.triggerExplosion(report.targetCol, report.targetRow, report);
+                                    refreshHud();
+                                    mapView.invalidate();
+                                });
+                            }
+                            try {
+                                Thread.sleep(850);
+                            } catch (InterruptedException ignored) {}
+                        }
+                    }
+                });
+
+                Thread.sleep(400);
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                if (!isFinishing() && !isDestroyed()) {
+                    runOnUiThread(() -> {
+                        isAiTurnRunning = false;
+                        setHudControlsEnabled(true);
+                        mapView.clearSelection();
+                        refreshHud();
+                        checkScenarioCompletion();
+                        if (engine.scenarioOutcome == 0 && engine.isPlayerTurn && engine.scenario != null) {
+                            sounds.playSelect();
+                            mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
+                            Toast.makeText(MainActivity.this, "\u2605 YOUR TURN! Turn " + engine.turn + " of " + engine.maxTurns + " \u2605", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            }
+        }).start();
     }
 
     private void checkScenarioCompletion() {
