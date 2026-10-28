@@ -2381,6 +2381,20 @@ public class PgGameEngine {
         return best;
     }
 
+    public double evaluateHypotheticalAttackScore(PgDatabase.ActiveUnit attacker, int fromCol, int fromRow, PgDatabase.ActiveUnit target) {
+        if (attacker == null || target == null || attacker.strength <= 0 || target.strength <= 0) return -999.0;
+        int origCol = attacker.col;
+        int origRow = attacker.row;
+        attacker.col = fromCol;
+        attacker.row = fromRow;
+        try {
+            return evaluateAiAttackScore(attacker, target);
+        } finally {
+            attacker.col = origCol;
+            attacker.row = origRow;
+        }
+    }
+
     public List<CombatReport> endPlayerTurnAndRunAi() {
         List<CombatReport> aiReports = new ArrayList<>();
         isPlayerTurn = false;
@@ -2833,12 +2847,41 @@ public class PgGameEngine {
                         else score -= 4.0; // Tanks avoid close terrain
                     }
 
-                    // Check if adjacent to enemy units from destination
+                    // Check if adjacent to enemy units from destination (mc, mr)
+                    List<PgDatabase.ActiveUnit> adjEnemies = new ArrayList<>();
                     for (int[] nb : getNeighbors(mc, mr)) {
                         PgDatabase.ActiveUnit adjEnemy = getUnitAt(nb[0], nb[1], false);
                         if (adjEnemy != null && adjEnemy.isAxis && adjEnemy.strength > 0) {
-                            if (adjEnemy.strength <= 4) score += 15.0;
-                            else score += 5.0;
+                            adjEnemies.add(adjEnemy);
+                        }
+                    }
+
+                    if (!adjEnemies.isEmpty()) {
+                        // Candidate hex is directly adjacent to one or more user units!
+                        // Predict combat against each adjacent target to verify if an attack is advantageous.
+                        double bestAtkScore = -999.0;
+                        for (PgDatabase.ActiveUnit enemy : adjEnemies) {
+                            double atkSc = evaluateHypotheticalAttackScore(ai, mc, mr, enemy);
+                            if (atkSc > bestAtkScore) {
+                                bestAtkScore = atkSc;
+                            }
+                        }
+
+                        if (bestAtkScore >= -1.0) {
+                            // Viable/favorable attack: reward moving into attack position
+                            score += 25.0 + (bestAtkScore * 2.0);
+                        } else {
+                            // Attack is unfavorable/bad: moving adjacent without a good attack sets the unit up for destruction!
+                            // Heavily penalize this move so the AI chooses other options (staging at dist 2, holding terrain, etc.)
+                            score -= 50.0 + (adjEnemies.size() * 15.0);
+                        }
+                    } else if (nearestEnemy != null) {
+                        // Not adjacent to any enemy from (mc, mr)
+                        int dEnemy = hexDistance(mc, mr, nearestEnemy.col, nearestEnemy.row);
+                        // Staging distance of 2 hexes allows threatening without exposing unit to close assault
+                        if (dEnemy == 2) {
+                            score += 10.0;
+                            if (destCell.isCloseDefenseTerrain()) score += 8.0;
                         }
                     }
 
@@ -2855,17 +2898,15 @@ public class PgGameEngine {
                     if (!postMoveTargets.isEmpty()) {
                         PgDatabase.ActiveUnit postBest = pickBestAiTarget(ai, postMoveTargets);
                         if (postBest != null) {
-                            double sc = evaluateAiAttackScore(ai, postBest);
-                            if (sc >= -2.0 || postBest.strength <= 3) {
-                                CombatReport rep = executeCombat(ai, postBest);
-                                aiReports.add(rep);
-                                if (rep.overrun && ai.strength > 0 && !ai.attacked) {
-                                    List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
-                                    if (!overrunTargets.isEmpty()) {
-                                        PgDatabase.ActiveUnit overBest = pickBestAiTarget(ai, overrunTargets);
-                                        if (overBest != null) {
-                                            aiReports.add(executeCombat(ai, overBest));
-                                        }
+                            // Having moved into attack position, execute the attack! Never move adjacent and sit idle.
+                            CombatReport rep = executeCombat(ai, postBest);
+                            aiReports.add(rep);
+                            if (rep.overrun && ai.strength > 0 && !ai.attacked) {
+                                List<PgDatabase.ActiveUnit> overrunTargets = getValidTargets(ai);
+                                if (!overrunTargets.isEmpty()) {
+                                    PgDatabase.ActiveUnit overBest = pickBestAiTarget(ai, overrunTargets);
+                                    if (overBest != null) {
+                                        aiReports.add(executeCombat(ai, overBest));
                                     }
                                 }
                             }
