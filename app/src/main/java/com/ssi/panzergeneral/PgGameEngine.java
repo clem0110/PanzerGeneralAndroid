@@ -338,14 +338,14 @@ public class PgGameEngine {
             }
         }
 
-        // If the unit has already moved or attacked, it cannot perform non-combat actions like supply, reinforce, mount, or upgrade
-        if (u.moved || u.movePointsUsed > 0 || u.attacked) {
-            return false;
-        }
-
         // 3. Can the unit mount/dismount/embark/disembark?
         if (canUseTransportAction(u)) {
             return true;
+        }
+
+        // If the unit has already moved or attacked, it cannot perform non-combat actions like supply, reinforce, or upgrade
+        if (u.moved || u.movePointsUsed > 0 || u.attacked) {
+            return false;
         }
 
         // 4. Can the unit take replacements (regular or elite)?
@@ -799,10 +799,11 @@ public class PgGameEngine {
 
                 boolean curIsWater = scenario.grid[c][r].isWater();
                 boolean nextIsWater = cell.isWater();
+                boolean curIsWaterOrPort = curIsWater || scenario.grid[c][r].isPort();
 
-                // 1. Sea Transport disembarkation: moving from water onto land consumes all MP and halts further movement
-                if (u.inSeaTransport && curIsWater && !nextIsWater) {
-                    if (getTerrainMoveCost(def, cell, false) >= 99) continue;
+                // 1. Sea Transport disembarkation: moving from water/port onto land consumes all MP and halts further movement
+                if (u.inSeaTransport && curIsWaterOrPort && !nextIsWater && !cell.isPort()) {
+                    if (getTerrainMoveCost(baseDef, cell, false) >= 99) continue;
                     int nKey = nr * scenario.cols + nc;
                     distMap.put(nKey, maxMove);
                     continue; // Disembarking ends movement along this path
@@ -883,8 +884,9 @@ public class PgGameEngine {
         if (u.inAirTransport || def.isAir()) return 1;
         if (u.inSeaTransport) {
             if (cell.isWater() || cell.isPort()) return 1;
-            // Entering land to disembark: check if ground terrain is passable
-            if (getTerrainMoveCost(def, cell, false) < 99) return 1;
+            // Entering land to disembark: check if ground terrain is passable for the underlying unit
+            PgDatabase.UnitDef baseDef = db.equipment.get(u.unitDefId);
+            if (getTerrainMoveCost(baseDef, cell, false) < 99) return 1;
             return 99;
         }
         if (def.isNaval()) {
@@ -2043,9 +2045,10 @@ public class PgGameEngine {
         if (u.inAirTransport) return "PARADROP";
         if (u.inSeaTransport) return "DISEMBARK";
         PgDatabase.HexCell cell = scenario.grid[u.col][u.row];
-        if (!def.isAir() && !def.isNaval() && !u.moved && u.movePointsUsed == 0 && !u.attacked) {
+        if (!def.isAir() && !def.isNaval() && !u.attacked) {
             if (cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, scenario)
                     && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
+                    && !u.moved && u.movePointsUsed == 0
                     && getUnitAt(u.col, u.row, true) == null) {
                 return "AIRLIFT";
             }
@@ -2065,6 +2068,7 @@ public class PgGameEngine {
             return getUnitAt(u.col, u.row, false) == null && getTerrainMoveCost(def, cell, false) < 99;
         }
         if (u.inSeaTransport) {
+            if (!cell.isWater()) return true; // In port or on land: can disembark in place
             if (getTerrainMoveCost(def, cell, false) < 99) return true;
             for (int[] nb : getNeighbors(u.col, u.row)) {
                 if (getUnitAt(nb[0], nb[1], false) == null
@@ -2074,13 +2078,13 @@ public class PgGameEngine {
             }
             return false;
         }
-        if (!u.moved && u.movePointsUsed == 0 && !u.attacked && !def.isAir() && !def.isNaval()) {
-            if (cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, scenario)
-                    && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
-                    && getUnitAt(u.col, u.row, true) == null) {
+        if (!u.attacked && !def.isAir() && !def.isNaval()) {
+            if (cell.isPort() && db.isAxisNation(cell.ownerNation, scenario)) {
                 return true;
             }
-            if (cell.isPort() && db.isAxisNation(cell.ownerNation, scenario)) {
+            if (!u.moved && u.movePointsUsed == 0 && cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, scenario)
+                    && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
+                    && getUnitAt(u.col, u.row, true) == null) {
                 return true;
             }
         }
@@ -2134,20 +2138,32 @@ public class PgGameEngine {
                         break;
                     }
                 }
+                u.inSeaTransport = false;
+                u.moved = true;
+                u.attacked = true;
+                u.movePointsUsed = getMaxMovementPoints(u);
+                onHexCaptured(u.col, u.row, u);
+                recalculateFogOfWar();
+                checkVictoryConditions();
+                return def.name + " disembarked at (" + u.col + "," + u.row + ")!";
+            } else {
+                // In port hex: disembark back onto port land
+                u.inSeaTransport = false;
+                if (!u.moved && u.movePointsUsed == 0) {
+                    u.attacked = false;
+                } else {
+                    u.moved = true;
+                    u.attacked = true;
+                    u.movePointsUsed = getMaxMovementPoints(u);
+                }
+                recalculateFogOfWar();
+                return def.name + " disembarked in port.";
             }
-            u.inSeaTransport = false;
-            u.moved = true;
-            u.attacked = true;
-            u.movePointsUsed = getMaxMovementPoints(u);
-            onHexCaptured(u.col, u.row, u);
-            recalculateFogOfWar();
-            checkVictoryConditions();
-            return def.name + " disembarked at (" + u.col + "," + u.row + ")!";
         }
-        if (!u.moved && u.movePointsUsed == 0 && !u.attacked && !def.isAir() && !def.isNaval()) {
+        if (!u.attacked && !def.isAir() && !def.isNaval()) {
             if (cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, scenario)
                     && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
-                    && getUnitAt(u.col, u.row, true) == null) {
+                    && getUnitAt(u.col, u.row, true) == null && !u.moved && u.movePointsUsed == 0) {
                 u.inAirTransport = true;
                 u.mountedInTransport = false;
                 u.moved = true;
@@ -2156,12 +2172,20 @@ public class PgGameEngine {
                 return def.name + " embarked into Ju 52 Air Transport!";
             }
             if (cell.isPort() && db.isAxisNation(cell.ownerNation, scenario)) {
+                boolean hadMoved = u.moved || u.movePointsUsed > 0;
                 u.inSeaTransport = true;
                 u.mountedInTransport = false;
-                u.moved = true;
-                u.attacked = true;
-                u.movePointsUsed = getMaxMovementPoints(u);
-                return def.name + " embarked into Naval Transport!";
+                u.entrenchment = 0;
+                u.attacked = true; // Sea transport cannot attack
+                if (hadMoved) {
+                    u.moved = true;
+                    u.movePointsUsed = getMaxMovementPoints(u);
+                    return def.name + " embarked into Naval Transport (movement completed for this turn).";
+                } else {
+                    u.moved = false;
+                    u.movePointsUsed = 0;
+                    return def.name + " embarked into Naval Transport! Ready to sail (" + getMaxMovementPoints(u) + " MP).";
+                }
             }
         }
         if (u.transportDefId > 0) {
