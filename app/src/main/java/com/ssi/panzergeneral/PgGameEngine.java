@@ -1932,16 +1932,24 @@ public class PgGameEngine {
         if (!canReinforceUnit(u, elite)) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         boolean inZoc = (u.col >= 0 && u.row >= 0) && isInEnemyZoc(u.col, u.row, u);
-        int maxTarget = elite ? (inZoc ? 10 : u.getMaxOverstrength()) : 10;
-        int needed = maxTarget - u.strength;
-        if (inZoc) {
-            // Enemy ZOC restricts replacements to half
-            needed = Math.max(1, needed / 2);
+
+        int needed;
+        int costPerPoint;
+        if (u.strength >= 10) {
+            // Overstrength rule: increments strength exactly 1 point at a time (e.g. 10 -> 11, then 11 -> 12)
+            needed = 1;
+            costPerPoint = Math.max(20, def.cost / 5);
+        } else {
+            // Normal / Elite replacements replenish damaged units up to 10
+            int maxTarget = 10;
+            needed = maxTarget - u.strength;
+            if (inZoc) {
+                // Enemy ZOC restricts replacements to half
+                needed = Math.max(1, needed / 2);
+            }
+            costPerPoint = Math.max(8, def.cost / (elite ? 10 : 20));
         }
-        // Overstrength points above 10 cost double elite replacement rate
-        int costPerPoint = (u.strength >= 10)
-                ? Math.max(20, def.cost / 5)
-                : Math.max(8, def.cost / (elite ? 10 : 20));
+
         int affordable = Math.min(needed, axisPrestige / costPerPoint);
         if (affordable <= 0) return false;
 

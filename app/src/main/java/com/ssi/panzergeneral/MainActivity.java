@@ -668,7 +668,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 }
                 btnReinforce.setEnabled(engine.canReinforceUnit(u, false));
                 btnElite.setEnabled(engine.canReinforceUnit(u, true));
-                btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+" : "ELITE+");
+                btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
                 btnUpgrade.setEnabled(engine.canUpgradeUnit(u));
                 btnMount.setEnabled(false);
             } else {
@@ -678,7 +678,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 btnSupply.setEnabled(canAct && engine.supplyEnabled);
                 btnReinforce.setEnabled(engine.canReinforceUnit(u, false));
                 btnElite.setEnabled(engine.canReinforceUnit(u, true));
-                btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+" : "ELITE+");
+                btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
                 btnUpgrade.setEnabled(engine.canUpgradeUnit(u));
                 btnMount.setText(engine.getTransportActionLabel(u));
                 btnMount.setEnabled(engine.canUseTransportAction(u));
@@ -1026,7 +1026,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 }
 
                 if (engine.canReinforceUnit(u, true)) {
-                    Button btnElite = createCompactButton(u.strength >= 10 && u.getStars() > 0 ? "OVRST+" : "ELITE+", 0xFF5D4037);
+                    Button btnElite = createCompactButton(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+", 0xFF5D4037);
                     btnElite.setOnClickListener(v -> {
                         sounds.playSelect();
                         engine.reinforceUnit(u, true);
