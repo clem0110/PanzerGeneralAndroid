@@ -2020,57 +2020,592 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         b.show();
     }
 
+    private String formatStatDiff(int newVal, int oldVal) {
+        int diff = newVal - oldVal;
+        if (diff > 0) return newVal + " (+" + diff + ")";
+        if (diff < 0) return newVal + " (" + diff + ")";
+        return String.valueOf(newVal);
+    }
+
     private void showUpgradeUnitDialog(PgDatabase.ActiveUnit u) {
         if (u == null || !engine.canUpgradeUnit(u)) {
-            Toast.makeText(this, "Unit must be unmoved on a friendly City/Port/Airfield with no adjacent enemies to upgrade.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Unit must be in deployment reserve or unmoved on a friendly City/Port/Airfield with no adjacent enemies to upgrade.", Toast.LENGTH_LONG).show();
             return;
         }
         PgDatabase.UnitDef currentDef = db.equipment.get(u.unitDefId);
-        List<PgDatabase.UnitDef> allAvail = getAvailableAxisUnitsForPurchase(purchaseShowAllYears);
-        List<PgDatabase.UnitDef> sameClass = new ArrayList<>();
-        for (PgDatabase.UnitDef cand : allAvail) {
-            if (cand.unitClass == currentDef.unitClass) {
-                sameClass.add(cand);
+
+        final android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(28, 20, 28, 20);
+
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(0xFF161B16);
+        rootBg.setCornerRadius(16f);
+        rootBg.setStroke(3, 0xFFC5A059);
+        root.setBackground(rootBg);
+
+        // 1. Header Row
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(0, 0, 0, 10);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("UPGRADE UNIT & MOUNTS");
+        tvTitle.setTextColor(0xFFFFD54F);
+        tvTitle.setTextSize(19f);
+        tvTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        headerRow.addView(tvTitle);
+
+        String starsText = u.getStars() > 0 ? (" ★".repeat(u.getStars())) : "";
+        TextView tvUnitSub = new TextView(this);
+        tvUnitSub.setText(String.format(Locale.ROOT, "  •  %s%s (Str: %d/%d, Exp: %d)",
+                currentDef.name, starsText, u.strength, u.getMaxOverstrength(), u.experience));
+        tvUnitSub.setTextColor(0xFFB0BEC5);
+        tvUnitSub.setTextSize(12.5f);
+        headerRow.addView(tvUnitSub, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView tvPrestigePill = new TextView(this);
+        tvPrestigePill.setText("★ " + engine.axisPrestige + " PRESTIGE");
+        tvPrestigePill.setTextColor(0xFF1A2218);
+        tvPrestigePill.setTextSize(13.5f);
+        tvPrestigePill.setTypeface(Typeface.DEFAULT_BOLD);
+        tvPrestigePill.setPadding(20, 8, 20, 8);
+        GradientDrawable pillBg = new GradientDrawable();
+        pillBg.setColor(0xFFFFD54F);
+        pillBg.setCornerRadius(8f);
+        tvPrestigePill.setBackground(pillBg);
+        LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pillLp.setMargins(12, 0, 16, 0);
+        headerRow.addView(tvPrestigePill, pillLp);
+
+        CheckBox cbAllYears = new CheckBox(this);
+        cbAllYears.setText("All Years (1939–45)");
+        cbAllYears.setTextColor(0xFFE0E0E0);
+        cbAllYears.setTextSize(12f);
+        cbAllYears.setChecked(purchaseShowAllYears);
+        headerRow.addView(cbAllYears);
+
+        Button btnClose = createCompactButton("✕ CLOSE", 0xFF7F2424);
+        btnClose.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+            if (engine.isDeploymentPhase && (u.col < 0 || u.row < 0)) {
+                showCoreDeploymentDialog();
             }
-        }
-        if (sameClass.isEmpty()) {
-            sameClass.add(currentDef);
-        }
+        });
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, 60);
+        closeLp.setMargins(14, 0, 0, 0);
+        btnClose.setLayoutParams(closeLp);
+        headerRow.addView(btnClose);
 
-        String[] labels = new String[sameClass.size()];
-        final int[] costs = new int[sameClass.size()];
-        for (int i = 0; i < sameClass.size(); i++) {
-            PgDatabase.UnitDef cand = sameClass.get(i);
-            int upgCost = Math.max(20, cand.cost - (currentDef.cost / 2));
-            costs[i] = upgCost;
-            labels[i] = String.format(Locale.ROOT,
-                    "%s (19%02d–%02d)  •  SA:%d HA:%d AA:%d GD:%d AD:%d Mov:%d  —  Upgrade Cost: ★ %d",
-                    cand.name, cand.startYear, cand.endYear,
-                    cand.softAttack, cand.hardAttack, cand.airAttack,
-                    cand.groundDefense, cand.airDefense, cand.movement, upgCost);
-        }
+        root.addView(headerRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        new AlertDialog.Builder(this)
-                .setTitle("Upgrade " + currentDef.name + " (Available Prestige: ★ " + engine.axisPrestige + ")")
-                .setItems(labels, (d, which) -> {
-                    PgDatabase.UnitDef chosen = sameClass.get(which);
-                    if (engine.axisPrestige < costs[which]) {
-                        Toast.makeText(this, "Insufficient Prestige (" + costs[which] + "★ needed).", Toast.LENGTH_SHORT).show();
-                        return;
+        // 2. Category Tab Strip
+        HorizontalScrollView tabScroll = new HorizontalScrollView(this);
+        tabScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout tabStrip = new LinearLayout(this);
+        tabStrip.setOrientation(LinearLayout.HORIZONTAL);
+        tabStrip.setPadding(0, 10, 0, 10);
+        tabScroll.addView(tabStrip);
+        root.addView(tabScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 3. Main Master-Detail Split Area
+        LinearLayout splitBody = new LinearLayout(this);
+        splitBody.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(splitBody, bodyLp);
+
+        // Left Pane: Illustrated Upgrade Options (52% width)
+        ScrollView rosterScroll = new ScrollView(this);
+        LinearLayout rosterContainer = new LinearLayout(this);
+        rosterContainer.setOrientation(LinearLayout.VERTICAL);
+        rosterContainer.setPadding(0, 0, 12, 0);
+        rosterScroll.addView(rosterContainer);
+        splitBody.addView(rosterScroll, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.08f));
+
+        // Right Pane: Detailed Showcase & Transport Selector (48% width)
+        ScrollView detailScroll = new ScrollView(this);
+        LinearLayout detailCard = new LinearLayout(this);
+        detailCard.setOrientation(LinearLayout.VERTICAL);
+        detailCard.setPadding(20, 16, 20, 16);
+        GradientDrawable detailBg = new GradientDrawable();
+        detailBg.setColor(0xFF212922);
+        detailBg.setCornerRadius(12f);
+        detailBg.setStroke(2, 0xFFC5A059);
+        detailCard.setBackground(detailBg);
+        detailScroll.addView(detailCard);
+        splitBody.addView(detailScroll, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.92f));
+
+        final int[] curCategory = new int[]{currentDef.unitClass};
+        final int[] curSelectedUnitDefId = new int[]{u.unitDefId};
+        final int[] curSelectedTransportId = new int[]{u.transportDefId};
+
+        final Runnable[] renderUI = new Runnable[1];
+        renderUI[0] = () -> {
+            List<PgDatabase.UnitDef> allAvail = getAvailableAxisUnitsForPurchase(purchaseShowAllYears);
+            tabStrip.removeAllViews();
+            rosterContainer.removeAllViews();
+            detailCard.removeAllViews();
+
+            // Category tabs
+            for (int i = 0; i < PURCHASE_CATEGORY_CLASSES.length; i++) {
+                final int catClass = PURCHASE_CATEGORY_CLASSES[i];
+                String catName = PURCHASE_CATEGORY_LABELS[i];
+                int repUnitId = CATEGORY_REP_UNIT_IDS[i];
+                int count = 0;
+                for (PgDatabase.UnitDef cand : allAvail) {
+                    if (cand.unitClass == catClass) count++;
+                }
+                if (catClass == currentDef.unitClass && count == 0) count = 1;
+
+                boolean isSelected = (catClass == curCategory[0]);
+                boolean isCurrentUnitClass = (catClass == currentDef.unitClass);
+
+                LinearLayout tabBox = new LinearLayout(this);
+                tabBox.setOrientation(LinearLayout.HORIZONTAL);
+                tabBox.setGravity(Gravity.CENTER_VERTICAL);
+                tabBox.setPadding(14, 8, 16, 8);
+
+                GradientDrawable tabBg = new GradientDrawable();
+                tabBg.setColor(isSelected ? 0xFF3A4A36 : (count > 0 ? 0xFF232C24 : 0xFF1A1E1A));
+                tabBg.setCornerRadius(10f);
+                tabBg.setStroke(isSelected ? 3 : (isCurrentUnitClass ? 2 : 1),
+                        isSelected ? 0xFFFFD54F : (isCurrentUnitClass ? 0xFF81C784 : 0xFF566557));
+                tabBox.setBackground(tabBg);
+
+                ImageView tabIcon = new ImageView(this);
+                if (repUnitId < db.equipment.size()) {
+                    Bitmap catBmp = assets.getTrimmedSprite("TACICONS.SHP", db.equipment.get(repUnitId).iconId);
+                    if (catBmp != null) {
+                        tabIcon.setImageBitmap(catBmp);
                     }
-                    if (engine.upgradeUnit(u, chosen.id, u.transportDefId)) {
-                        sounds.playSelect();
+                }
+                LinearLayout.LayoutParams tiLp = new LinearLayout.LayoutParams(54, 38);
+                tiLp.setMargins(0, 0, 10, 0);
+                tabBox.addView(tabIcon, tiLp);
+
+                TextView tvTab = new TextView(this);
+                String tag = isCurrentUnitClass ? " ★" : "";
+                tvTab.setText(String.format(Locale.ROOT, "%s (%d)%s", catName, count, tag));
+                tvTab.setTextColor(isSelected ? 0xFFFFD54F : (isCurrentUnitClass ? 0xFF81C784 : (count > 0 ? Color.WHITE : 0xFF78909C)));
+                tvTab.setTextSize(12.5f);
+                tvTab.setTypeface(Typeface.DEFAULT_BOLD);
+                tabBox.addView(tvTab);
+
+                LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tLp.setMargins(0, 0, 10, 0);
+                tabBox.setLayoutParams(tLp);
+
+                tabBox.setOnClickListener(v -> {
+                    sounds.playClick();
+                    curCategory[0] = catClass;
+                    curSelectedUnitDefId[0] = -1;
+                    renderUI[0].run();
+                });
+                tabStrip.addView(tabBox);
+            }
+
+            // Gather units for active category
+            List<PgDatabase.UnitDef> catUnits = new ArrayList<>();
+            boolean currentDefInList = false;
+            for (PgDatabase.UnitDef cand : allAvail) {
+                if (cand.unitClass == curCategory[0]) {
+                    catUnits.add(cand);
+                    if (cand.id == currentDef.id) currentDefInList = true;
+                }
+            }
+            // Always ensure current equipment is present so user can keep it and just add/change mounts
+            if (curCategory[0] == currentDef.unitClass && !currentDefInList) {
+                catUnits.add(0, currentDef);
+            }
+
+            if (catUnits.isEmpty()) {
+                TextView emptyTv = new TextView(this);
+                emptyTv.setText("No upgrade candidates available in this category.\nCheck 'All Years (1939–45)' above to view all equipment.");
+                emptyTv.setTextColor(0xFFB0BEC5);
+                emptyTv.setTextSize(14f);
+                emptyTv.setPadding(24, 60, 24, 60);
+                emptyTv.setGravity(Gravity.CENTER);
+                rosterContainer.addView(emptyTv);
+                return;
+            }
+
+            // Pick active unit
+            PgDatabase.UnitDef activeDef = null;
+            for (PgDatabase.UnitDef cand : catUnits) {
+                if (cand.id == curSelectedUnitDefId[0]) {
+                    activeDef = cand;
+                    break;
+                }
+            }
+            if (activeDef == null) {
+                activeDef = (curCategory[0] == currentDef.unitClass) ? currentDef : catUnits.get(0);
+                curSelectedUnitDefId[0] = activeDef.id;
+            }
+
+            // Render Left Pane Unit Cards
+            for (PgDatabase.UnitDef cand : catUnits) {
+                boolean isChosen = (cand.id == activeDef.id);
+                boolean isCurrentEqp = (cand.id == u.unitDefId);
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(LinearLayout.HORIZONTAL);
+                card.setGravity(Gravity.CENTER_VERTICAL);
+                card.setPadding(12, 10, 14, 10);
+
+                GradientDrawable cardBg = new GradientDrawable();
+                cardBg.setColor(isChosen ? 0xFF2F3E30 : 0xFF212922);
+                cardBg.setCornerRadius(10f);
+                cardBg.setStroke(isChosen ? 3 : 1, isChosen ? 0xFFFFD54F : (isCurrentEqp ? 0xFF81C784 : 0xFF4A5D4C));
+                card.setBackground(cardBg);
+
+                LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cardLp.setMargins(0, 0, 0, 10);
+                card.setLayoutParams(cardLp);
+
+                // Framed portrait
+                ImageView ivPortrait = new ImageView(this);
+                ivPortrait.setImageBitmap(assets.createUnitPortrait(cand.iconId, cand.unitClass, 156, 100));
+                LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(156, 100);
+                pLp.setMargins(0, 0, 14, 0);
+                card.addView(ivPortrait, pLp);
+
+                // Middle Info
+                LinearLayout infoCol = new LinearLayout(this);
+                infoCol.setOrientation(LinearLayout.VERTICAL);
+                card.addView(infoCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                LinearLayout titleRow = new LinearLayout(this);
+                titleRow.setOrientation(LinearLayout.HORIZONTAL);
+                titleRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                TextView tvName = new TextView(this);
+                tvName.setText(cand.name);
+                tvName.setTextColor(isChosen ? 0xFFFFD54F : Color.WHITE);
+                tvName.setTextSize(15.5f);
+                tvName.setTypeface(Typeface.DEFAULT_BOLD);
+                titleRow.addView(tvName);
+
+                if (isCurrentEqp) {
+                    TextView tvCurrentBadge = new TextView(this);
+                    tvCurrentBadge.setText(" CURRENT ");
+                    tvCurrentBadge.setTextColor(0xFF1B5E20);
+                    tvCurrentBadge.setTextSize(10f);
+                    tvCurrentBadge.setTypeface(Typeface.DEFAULT_BOLD);
+                    GradientDrawable badgeBg = new GradientDrawable();
+                    badgeBg.setColor(0xFFA5D6A7);
+                    badgeBg.setCornerRadius(4f);
+                    tvCurrentBadge.setBackground(badgeBg);
+                    LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    bLp.setMargins(10, 0, 0, 0);
+                    titleRow.addView(tvCurrentBadge, bLp);
+                }
+                infoCol.addView(titleRow);
+
+                String targetStr = (cand.targetType == PgDatabase.TARGET_HARD) ? "Armored / Hard"
+                        : (cand.targetType == PgDatabase.TARGET_AIR ? "Aircraft" : "Soft Target");
+                TextView tvSub = new TextView(this);
+                tvSub.setText(String.format(Locale.ROOT, "Service: 19%02d–19%02d  •  %s",
+                        cand.startYear, cand.endYear, targetStr));
+                tvSub.setTextColor(0xFFA5B5A7);
+                tvSub.setTextSize(11.5f);
+                infoCol.addView(tvSub);
+
+                TextView tvQuickStats = new TextView(this);
+                tvQuickStats.setText(String.format(Locale.ROOT,
+                        "SA: %d   HA: %d   AA: %d   |   GD: %d   AD: %d   |   Mov: %d   Rng: %d",
+                        cand.softAttack, cand.hardAttack, cand.airAttack, cand.groundDefense, cand.airDefense, cand.movement, cand.range));
+                tvQuickStats.setTextColor(0xFFE0E8E1);
+                tvQuickStats.setTextSize(12f);
+                tvQuickStats.setPadding(0, 4, 0, 0);
+                infoCol.addView(tvQuickStats);
+
+                // Right Cost Badge
+                int chassisUpgCost = (cand.id == u.unitDefId) ? 0 : Math.max(20, cand.cost - (currentDef.cost / 2));
+                boolean affordable = (engine.axisPrestige >= chassisUpgCost);
+
+                LinearLayout priceCol = new LinearLayout(this);
+                priceCol.setOrientation(LinearLayout.VERTICAL);
+                priceCol.setGravity(Gravity.CENTER);
+                priceCol.setPadding(14, 8, 14, 8);
+                GradientDrawable priceBg = new GradientDrawable();
+                priceBg.setColor(isCurrentEqp ? 0xFF1B3820 : (affordable ? 0xFF28472C : 0xFF3E2723));
+                priceBg.setCornerRadius(8f);
+                priceBg.setStroke(1, isCurrentEqp ? 0xFF81C784 : (affordable ? 0xFF81C784 : 0xFFE57373));
+                priceCol.setBackground(priceBg);
+
+                TextView tvCost = new TextView(this);
+                tvCost.setText(isCurrentEqp ? "★ 0" : ("★ " + chassisUpgCost));
+                tvCost.setTextColor(isCurrentEqp ? 0xFF81C784 : (affordable ? 0xFFFFE082 : 0xFFFF8A80));
+                tvCost.setTextSize(14f);
+                tvCost.setTypeface(Typeface.DEFAULT_BOLD);
+                priceCol.addView(tvCost);
+
+                TextView tvCostSub = new TextView(this);
+                tvCostSub.setText(isCurrentEqp ? "KEEP CHASSIS" : "UPGRADE");
+                tvCostSub.setTextColor(0xFFCFD8DC);
+                tvCostSub.setTextSize(9.5f);
+                priceCol.addView(tvCostSub);
+
+                card.addView(priceCol);
+
+                card.setOnClickListener(v -> {
+                    sounds.playClick();
+                    curSelectedUnitDefId[0] = cand.id;
+                    renderUI[0].run();
+                });
+
+                rosterContainer.addView(card);
+            }
+
+            // Render Right Pane Details & Transport Picker
+            final PgDatabase.UnitDef sel = activeDef;
+            boolean supportsTransport = (sel.unitClass == PgDatabase.CLASS_INFANTRY
+                    || sel.unitClass == PgDatabase.CLASS_ARTILLERY
+                    || sel.unitClass == PgDatabase.CLASS_ANTI_TANK
+                    || sel.unitClass == PgDatabase.CLASS_ANTI_AIR
+                    || sel.unitClass == PgDatabase.CLASS_AIR_DEFENSE);
+            if (!supportsTransport) {
+                curSelectedTransportId[0] = 0;
+            }
+
+            // Hero Header
+            LinearLayout heroRow = new LinearLayout(this);
+            heroRow.setOrientation(LinearLayout.HORIZONTAL);
+            heroRow.setGravity(Gravity.CENTER_VERTICAL);
+            heroRow.setPadding(0, 0, 0, 12);
+
+            ImageView ivHero = new ImageView(this);
+            ivHero.setImageBitmap(assets.createUnitPortrait(sel.iconId, sel.unitClass, 240, 148));
+            LinearLayout.LayoutParams heroImgLp = new LinearLayout.LayoutParams(240, 148);
+            heroImgLp.setMargins(0, 0, 16, 0);
+            heroRow.addView(ivHero, heroImgLp);
+
+            LinearLayout heroInfo = new LinearLayout(this);
+            heroInfo.setOrientation(LinearLayout.VERTICAL);
+
+            String clsName = (sel.unitClass >= 0 && sel.unitClass < PgDatabase.CLASS_NAMES.length)
+                    ? PgDatabase.CLASS_NAMES[sel.unitClass] : "Unit";
+            TextView tvHeroClass = new TextView(this);
+            tvHeroClass.setText(clsName.toUpperCase(Locale.ROOT) + "  •  EQUIPMENT #" + sel.id);
+            tvHeroClass.setTextColor(0xFF81C784);
+            tvHeroClass.setTextSize(11f);
+            tvHeroClass.setTypeface(Typeface.DEFAULT_BOLD);
+            heroInfo.addView(tvHeroClass);
+
+            TextView tvHeroName = new TextView(this);
+            tvHeroName.setText(sel.name);
+            tvHeroName.setTextColor(0xFFFFD54F);
+            tvHeroName.setTextSize(20f);
+            tvHeroName.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+            heroInfo.addView(tvHeroName);
+
+            int chassisCost = (sel.id == u.unitDefId) ? 0 : Math.max(20, sel.cost - (currentDef.cost / 2));
+            TextView tvHeroMeta = new TextView(this);
+            tvHeroMeta.setText(String.format(Locale.ROOT,
+                    "Service: 19%02d–19%02d  •  Chassis Upgrade Cost: ★ %d\nUnit Strength: %d/%d  •  Experience: %d (%s)",
+                    sel.startYear, sel.endYear, chassisCost,
+                    u.strength, u.getMaxOverstrength(), u.experience,
+                    u.getStars() > 0 ? (u.getStars() + "★ Veteran") : "Regular"));
+            tvHeroMeta.setTextColor(0xFFD0D8D0);
+            tvHeroMeta.setTextSize(12f);
+            heroInfo.addView(tvHeroMeta);
+
+            heroRow.addView(heroInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            detailCard.addView(heroRow);
+
+            // 4x3 Tactical Specs with Diff Comparison
+            TextView tvSpecsHdr = new TextView(this);
+            tvSpecsHdr.setText("COMBAT & OPERATIONAL SPECIFICATIONS (COMPARISON)");
+            tvSpecsHdr.setTextColor(0xFFC5A059);
+            tvSpecsHdr.setTextSize(11.5f);
+            tvSpecsHdr.setTypeface(Typeface.DEFAULT_BOLD);
+            tvSpecsHdr.setPadding(0, 4, 0, 6);
+            detailCard.addView(tvSpecsHdr);
+
+            Object[][] statRows = {
+                {
+                    createStatBadge("Soft Attack", formatStatDiff(sel.softAttack, currentDef.softAttack), sel.softAttack, 24, 0xFFE57373),
+                    createStatBadge("Hard Attack", formatStatDiff(sel.hardAttack, currentDef.hardAttack), sel.hardAttack, 24, 0xFFFF8A65),
+                    createStatBadge("Air Attack", formatStatDiff(sel.airAttack, currentDef.airAttack), sel.airAttack, 20, 0xFF64B5F6)
+                },
+                {
+                    createStatBadge("Ground Def", formatStatDiff(sel.groundDefense, currentDef.groundDefense), sel.groundDefense, 20, 0xFF81C784),
+                    createStatBadge("Air Defense", formatStatDiff(sel.airDefense, currentDef.airDefense), sel.airDefense, 20, 0xFF4DB6AC),
+                    createStatBadge("Close Def", formatStatDiff(sel.closeDefense, currentDef.closeDefense), sel.closeDefense, 12, 0xFFAED581)
+                },
+                {
+                    createStatBadge("Initiative", formatStatDiff(sel.initiative, currentDef.initiative), sel.initiative, 15, 0xFFFFD54F),
+                    createStatBadge("Movement", formatStatDiff(sel.movement, currentDef.movement) + " hex", sel.movement, 14, 0xFF90CAF9),
+                    createStatBadge("Range / Spot", sel.range + " / " + sel.spotting, sel.range * 3 + sel.spotting, 16, 0xFFCE93D8)
+                },
+                {
+                    createStatBadge("Max Fuel", engine.supplyEnabled ? formatStatDiff(sel.maxFuel, currentDef.maxFuel) : "∞ (OFF)", sel.maxFuel, 90, 0xFFFFB74D),
+                    createStatBadge("Max Ammo", engine.supplyEnabled ? formatStatDiff(sel.maxAmmo, currentDef.maxAmmo) : "∞ (OFF)", sel.maxAmmo, 16, 0xFFA1887F),
+                    createStatBadge("Naval Atk", formatStatDiff(sel.navalAttack, currentDef.navalAttack), sel.navalAttack, 16, 0xFF4FC3F7)
+                }
+            };
+
+            for (Object[] rowWidgets : statRows) {
+                LinearLayout sRow = new LinearLayout(this);
+                sRow.setOrientation(LinearLayout.HORIZONTAL);
+                for (int c = 0; c < rowWidgets.length; c++) {
+                    View w = (View) rowWidgets[c];
+                    LinearLayout.LayoutParams wLp = new LinearLayout.LayoutParams(
+                            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                    wLp.setMargins(c == 0 ? 0 : 6, 0, c == rowWidgets.length - 1 ? 0 : 6, 8);
+                    sRow.addView(w, wLp);
+                }
+                detailCard.addView(sRow);
+            }
+
+            // Organic Transport / Mount Picker
+            if (supportsTransport) {
+                TextView tvTrpHdr = new TextView(this);
+                tvTrpHdr.setText("ORGANIC LAND TRANSPORT / MOUNTS (OPTIONAL)");
+                tvTrpHdr.setTextColor(0xFFC5A059);
+                tvTrpHdr.setTextSize(11.5f);
+                tvTrpHdr.setTypeface(Typeface.DEFAULT_BOLD);
+                tvTrpHdr.setPadding(0, 6, 0, 6);
+                detailCard.addView(tvTrpHdr);
+
+                LinearLayout trpStrip = new LinearLayout(this);
+                trpStrip.setOrientation(LinearLayout.HORIZONTAL);
+                int[] trpIds = {0, 86, 87, 88};
+                for (int i = 0; i < trpIds.length; i++) {
+                    final int tid = trpIds[i];
+                    boolean isTrpSel = (curSelectedTransportId[0] == tid);
+                    boolean isEquipped = (u.transportDefId == tid);
+                    PgDatabase.UnitDef trpDef = (tid > 0 && tid < db.equipment.size()) ? db.equipment.get(tid) : null;
+                    int addCost = (tid == u.transportDefId) ? 0 : ((trpDef != null) ? Math.max(10, trpDef.cost / 2) : 0);
+
+                    LinearLayout tCard = new LinearLayout(this);
+                    tCard.setOrientation(LinearLayout.VERTICAL);
+                    tCard.setGravity(Gravity.CENTER_HORIZONTAL);
+                    tCard.setPadding(8, 8, 8, 8);
+                    GradientDrawable tBg = new GradientDrawable();
+                    tBg.setColor(isTrpSel ? 0xFF334434 : 0xFF19201A);
+                    tBg.setCornerRadius(8f);
+                    tBg.setStroke(isTrpSel ? 2 : 1, isTrpSel ? 0xFFFFD54F : (isEquipped ? 0xFF81C784 : 0xFF455A48));
+                    tCard.setBackground(tBg);
+
+                    ImageView ivTrp = new ImageView(this);
+                    if (trpDef != null) {
+                        ivTrp.setImageBitmap(assets.createUnitPortrait(trpDef.iconId, trpDef.unitClass, 110, 66));
+                    } else {
+                        ivTrp.setImageBitmap(assets.createUnitPortrait(sel.iconId, sel.unitClass, 110, 66));
+                    }
+                    tCard.addView(ivTrp, new LinearLayout.LayoutParams(110, 66));
+
+                    TextView tvTrpName = new TextView(this);
+                    tvTrpName.setText(trpDef != null ? trpDef.name : "Foot / Towed");
+                    tvTrpName.setTextColor(isTrpSel ? 0xFFFFD54F : Color.WHITE);
+                    tvTrpName.setTextSize(11f);
+                    tvTrpName.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvTrpName.setSingleLine(true);
+                    tvTrpName.setPadding(0, 4, 0, 0);
+                    tCard.addView(tvTrpName);
+
+                    TextView tvTrpMeta = new TextView(this);
+                    String badgeStr = isEquipped ? "EQUIPPED" : (addCost > 0 ? ("+" + addCost + "★") : "0★");
+                    tvTrpMeta.setText(trpDef != null
+                            ? String.format(Locale.ROOT, "%s • Mov:%d GD:%d", badgeStr, trpDef.movement, trpDef.groundDefense)
+                            : String.format(Locale.ROOT, "%s • Mov:%d", badgeStr, sel.movement));
+                    tvTrpMeta.setTextColor(isEquipped ? 0xFF81C784 : 0xFFB0BEC5);
+                    tvTrpMeta.setTextSize(10f);
+                    tCard.addView(tvTrpMeta);
+
+                    tCard.setOnClickListener(v -> {
+                        sounds.playClick();
+                        curSelectedTransportId[0] = tid;
+                        renderUI[0].run();
+                    });
+
+                    LinearLayout.LayoutParams tcLp = new LinearLayout.LayoutParams(
+                            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                    tcLp.setMargins(i == 0 ? 0 : 4, 0, i == trpIds.length - 1 ? 0 : 4, 8);
+                    trpStrip.addView(tCard, tcLp);
+                }
+                detailCard.addView(trpStrip);
+            }
+
+            final int finalTotalCost = engine.getUpgradeCost(u, sel.id, curSelectedTransportId[0]);
+            boolean canAfford = (engine.axisPrestige >= finalTotalCost);
+            boolean noChange = (sel.id == u.unitDefId && curSelectedTransportId[0] == u.transportDefId);
+
+            String trpSuffix = (curSelectedTransportId[0] > 0 && curSelectedTransportId[0] < db.equipment.size())
+                    ? (" + " + db.equipment.get(curSelectedTransportId[0]).name) : "";
+
+            String btnLabel;
+            int btnBgColor;
+            int btnTextColor;
+
+            if (noChange) {
+                btnLabel = "EQUIPMENT UNCHANGED (SELECT AN UPGRADE OR MOUNT)";
+                btnBgColor = 0xFF37474F;
+                btnTextColor = 0xFFB0BEC5;
+            } else if (canAfford) {
+                btnLabel = String.format(Locale.ROOT, "UPGRADE %s TO %s%s  —  ★ %d PRESTIGE",
+                        currentDef.name.toUpperCase(Locale.ROOT), sel.name.toUpperCase(Locale.ROOT), trpSuffix, finalTotalCost);
+                btnBgColor = 0xFF2E6B36;
+                btnTextColor = 0xFFFFF59D;
+            } else {
+                btnLabel = String.format(Locale.ROOT, "INSUFFICIENT PRESTIGE (NEED ★ %d, HAVE ★ %d)",
+                        finalTotalCost, engine.axisPrestige);
+                btnBgColor = 0xFF455A64;
+                btnTextColor = 0xFFCFD8DC;
+            }
+
+            Button btnConfirmUpg = createStyledButton(btnLabel, btnBgColor, btnTextColor);
+            LinearLayout.LayoutParams upgBtnLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            upgBtnLp.setMargins(0, 10, 0, 4);
+            btnConfirmUpg.setLayoutParams(upgBtnLp);
+            btnConfirmUpg.setEnabled(!noChange && canAfford);
+
+            btnConfirmUpg.setOnClickListener(v -> {
+                if (noChange) return;
+                if (!canAfford) {
+                    Toast.makeText(this, "Insufficient Prestige (" + finalTotalCost + "★ required).", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (engine.upgradeUnit(u, sel.id, curSelectedTransportId[0])) {
+                    sounds.playSelect();
+                    dialog.dismiss();
+                    if (engine.isDeploymentPhase && (u.col < 0 || u.row < 0)) {
+                        showCoreDeploymentDialog();
+                    } else {
                         mapView.selectUnit(u);
                         refreshHud();
-                        Toast.makeText(this, "Upgraded unit to " + chosen.name + "!", Toast.LENGTH_SHORT).show();
+                        mapView.invalidate();
                     }
-                })
-                .setNeutralButton(purchaseShowAllYears ? "Filter By Year" : "Unlock All Years (1939–45)", (d, w) -> {
-                    purchaseShowAllYears = !purchaseShowAllYears;
-                    showUpgradeUnitDialog(u);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+                    Toast.makeText(this, "Successfully upgraded to " + sel.name + trpSuffix + "!", Toast.LENGTH_SHORT).show();
+                }
+            });
+            detailCard.addView(btnConfirmUpg);
+        };
+
+        cbAllYears.setOnCheckedChangeListener((btn, isChecked) -> {
+            purchaseShowAllYears = isChecked;
+            renderUI[0].run();
+        });
+
+        renderUI[0].run();
+        dialog.setContentView(root, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        dialog.show();
     }
 
     private void showFieldManualDialog() {

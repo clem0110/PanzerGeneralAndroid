@@ -1974,7 +1974,7 @@ public class PgGameEngine {
         if (def.isFortification()) return false;
         if (u.inAirTransport || u.inSeaTransport) return false;
         if (u.col < 0 || u.row < 0) {
-            return isDeploymentPhase && axisPrestige >= 20;
+            return isDeploymentPhase;
         }
         if (isInEnemyZoc(u.col, u.row, u)) return false;
         PgDatabase.HexCell cell = scenario.grid[u.col][u.row];
@@ -1984,21 +1984,35 @@ public class PgGameEngine {
         return cell.isSupplyPoint() && db.isAxisNation(cell.ownerNation, scenario);
     }
 
+    public int getUpgradeCost(PgDatabase.ActiveUnit u, int newUnitDefId, int newTransportDefId) {
+        if (u == null) return 0;
+        PgDatabase.UnitDef oldDef = db.equipment.get(u.unitDefId);
+        PgDatabase.UnitDef newDef = (newUnitDefId > 0 && newUnitDefId < db.equipment.size())
+                ? db.equipment.get(newUnitDefId) : oldDef;
+        int upgradeCost = 0;
+        if (newUnitDefId != u.unitDefId) {
+            upgradeCost = Math.max(20, newDef.cost - (oldDef.cost / 2));
+        }
+        if (newTransportDefId > 0 && newTransportDefId != u.transportDefId && newTransportDefId < db.equipment.size()) {
+            upgradeCost += Math.max(10, db.equipment.get(newTransportDefId).cost / 2);
+        }
+        return upgradeCost;
+    }
+
     public boolean upgradeUnit(PgDatabase.ActiveUnit u, int newUnitDefId, int newTransportDefId) {
         if (!canUpgradeUnit(u)) return false;
         if (newUnitDefId <= 0 || newUnitDefId >= db.equipment.size()) return false;
-        PgDatabase.UnitDef oldDef = db.equipment.get(u.unitDefId);
-        PgDatabase.UnitDef newDef = db.equipment.get(newUnitDefId);
-        int upgradeCost = Math.max(20, newDef.cost - (oldDef.cost / 2));
-        if (newTransportDefId > 0 && newTransportDefId != u.transportDefId && newTransportDefId < db.equipment.size()) {
-            upgradeCost += db.equipment.get(newTransportDefId).cost / 2;
+        if (newUnitDefId == u.unitDefId && newTransportDefId == u.transportDefId) {
+            return true;
         }
+        PgDatabase.UnitDef newDef = db.equipment.get(newUnitDefId);
+        int upgradeCost = getUpgradeCost(u, newUnitDefId, newTransportDefId);
         if (axisPrestige < upgradeCost) return false;
 
         axisPrestige -= upgradeCost;
         u.unitDefId = newUnitDefId;
         u.transportDefId = newTransportDefId;
-        u.strength = Math.min(10, u.strength);
+        u.strength = Math.min(u.getMaxOverstrength(), u.strength);
         u.fuel = newDef.maxFuel > 0 ? newDef.maxFuel : 99;
         u.ammo = newDef.maxAmmo > 0 ? newDef.maxAmmo : 99;
         if (!isDeploymentPhase) {
