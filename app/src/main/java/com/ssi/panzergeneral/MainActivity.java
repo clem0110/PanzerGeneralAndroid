@@ -786,7 +786,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             mapView.selectUnit(unit);
             refreshHud();
             mapView.invalidate();
-            Toast.makeText(this, "Deployed " + db.equipment.get(unit.unitDefId).name + " at (" + col + "," + row + ")", Toast.LENGTH_SHORT).show();
+            boolean inSea = unit.inSeaTransport;
+            String msg = "Deployed " + db.equipment.get(unit.unitDefId).name + " at (" + col + "," + row + ")"
+                    + (inSea ? " [Naval Transport]" : "");
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
         } else {
             Toast.makeText(this, "Cannot deploy core unit on that hex.", Toast.LENGTH_SHORT).show();
         }

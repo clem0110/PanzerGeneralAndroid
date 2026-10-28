@@ -410,28 +410,35 @@ public class PgGameEngine {
         for (int[] d : scenario.deployHexes) {
             int dc = d[0], dr = d[1];
             if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
-                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir) && !hasEnemyAdjacentOrOnHex(dc, dr, true)) {
+                // Ground units are permitted to deploy on water deploy hexes (embarking in sea transports)
+                boolean allowWater = !isAir;
+                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !hasEnemyAdjacentOrOnHex(dc, dr, true)) {
                     added[dc][dr] = true;
                     res.add(new int[]{dc, dr});
                 }
             }
         }
 
-        // 2. Controlled cities (for ground) or controlled airfields (for air)
+        // 2. Controlled cities (for ground), controlled airfields (for air), or controlled ports
         int targetBaseTerrain = isAir ? 6 : 8;
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
-                if (cell.terrainType == targetBaseTerrain && db.isAxisNation(cell.ownerNation, scenario)) {
+                boolean isControlledBase = (cell.terrainType == targetBaseTerrain || (!isAir && cell.isPort()))
+                        && db.isAxisNation(cell.ownerNation, scenario);
+                if (isControlledBase) {
                     if (hasEnemyAdjacentOrOnHex(c, r, true)) continue;
-                    if (!added[c][r] && canDeployAtHex(c, r, isAir)) {
+                    boolean allowWaterOnBase = !isAir && (cell.isWater() || cell.isPort() || cell.isDeployHex);
+                    if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase)) {
                         added[c][r] = true;
                         res.add(new int[]{c, r});
                     }
                     for (int[] nb : getNeighbors(c, r)) {
                         int nc = nb[0], nr = nb[1];
                         if (nc >= 0 && nc < scenario.cols && nr >= 0 && nr < scenario.rows) {
-                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir) && !hasEnemyAdjacentOrOnHex(nc, nr, true)) {
+                            PgDatabase.HexCell nbCell = scenario.grid[nc][nr];
+                            boolean allowWaterNb = !isAir && (cell.isPort() || nbCell.isDeployHex || nbCell.isPort());
+                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir, allowWaterNb) && !hasEnemyAdjacentOrOnHex(nc, nr, true)) {
                                 added[nc][nr] = true;
                                 res.add(new int[]{nc, nr});
                             }
@@ -441,6 +448,18 @@ public class PgGameEngine {
             }
         }
         return res;
+    }
+
+    public boolean isHexValidForCoreDeployment(int col, int row) {
+        if (!isDeploymentPhase || scenario == null || unplacedCoreUnits.isEmpty()) return false;
+        if (col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
+        if (scenario.grid[col][row].isDeployHex) return true;
+        for (PgDatabase.ActiveUnit u : unplacedCoreUnits) {
+            for (int[] h : getValidCoreDeploymentHexes(u)) {
+                if (h[0] == col && h[1] == row) return true;
+            }
+        }
+        return false;
     }
 
     public boolean deployCoreUnit(PgDatabase.ActiveUnit u, int col, int row) {
@@ -460,6 +479,15 @@ public class PgGameEngine {
         u.movePointsUsed = 0;
         u.moved = false;
         u.attacked = false;
+
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        boolean onWater = scenario.grid[col][row].terrainType == 2 || scenario.grid[col][row].isWater();
+        if (def != null && !def.isAir() && !def.isNaval() && onWater) {
+            u.inSeaTransport = true;
+        } else {
+            u.inSeaTransport = false;
+        }
+
         if (!units.contains(u)) {
             units.add(u);
         }
@@ -473,6 +501,7 @@ public class PgGameEngine {
         if (units.remove(u)) {
             u.col = -1;
             u.row = -1;
+            u.inSeaTransport = false;
             if (!unplacedCoreUnits.contains(u)) {
                 unplacedCoreUnits.add(u);
             }
@@ -510,7 +539,8 @@ public class PgGameEngine {
             for (int[] d : scenario.deployHexes) {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
-                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir)) {
+                    boolean allowWater = !isAir;
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
                     }
@@ -520,8 +550,11 @@ public class PgGameEngine {
             for (int c = 0; c < scenario.cols; c++) {
                 for (int r = 0; r < scenario.rows; r++) {
                     PgDatabase.HexCell cell = scenario.grid[c][r];
-                    if (cell.terrainType == targetBaseTerrain && db.isAxisNation(cell.ownerNation, scenario)) {
-                        if (!added[c][r] && canDeployAtHex(c, r, isAir)) {
+                    boolean isControlledBase = (cell.terrainType == targetBaseTerrain || (!isAir && cell.isPort()))
+                            && db.isAxisNation(cell.ownerNation, scenario);
+                    if (isControlledBase) {
+                        boolean allowWaterOnBase = !isAir && (cell.isWater() || cell.isPort() || cell.isDeployHex);
+                        if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
@@ -537,7 +570,7 @@ public class PgGameEngine {
             for (int[] d : scenario.deployHexes) {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
-                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false)) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false, true)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
                     }
@@ -547,7 +580,7 @@ public class PgGameEngine {
                 for (int r = 0; r < scenario.rows; r++) {
                     PgDatabase.HexCell cell = scenario.grid[c][r];
                     if (cell.terrainType == 8 && db.isAxisNation(cell.ownerNation, scenario)) {
-                        if (!added[c][r] && canDeployAtHex(c, r, false)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, false, false)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
@@ -610,14 +643,22 @@ public class PgGameEngine {
     }
 
     private boolean canDeployAtHex(int col, int row, boolean isAir) {
+        return canDeployAtHex(col, row, isAir, false);
+    }
+
+    private boolean canDeployAtHex(int col, int row, boolean isAir, boolean allowWater) {
         if (col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
         // Target layer (air vs. ground) must be unoccupied
         if (getUnitAt(col, row, isAir) != null) return false;
         // Cannot deploy onto a hex that has an enemy unit on the other layer
         PgDatabase.ActiveUnit otherLayerUnit = getUnitAt(col, row, !isAir);
         if (otherLayerUnit != null && !otherLayerUnit.isAxis) return false;
-        // Ground units cannot deploy onto deep ocean or water hexes
-        if (!isAir && (scenario.grid[col][row].terrainType == 2 || scenario.grid[col][row].isWater())) return false;
+
+        boolean isWaterHex = scenario.grid[col][row].terrainType == 2 || scenario.grid[col][row].isWater();
+        // Air units cannot deploy onto water
+        if (isAir && isWaterHex) return false;
+        // Ground units cannot deploy onto deep ocean or water hexes unless allowWater is true (e.g. amphibious deploy hexes / sea transport)
+        if (!isAir && isWaterHex && !allowWater) return false;
         return true;
     }
 
@@ -2257,6 +2298,7 @@ public class PgGameEngine {
 
         axisPrestige -= totalCost;
         int curId = nextInstanceId++;
+        boolean onWater = scenario.grid[col][row].terrainType == 2 || scenario.grid[col][row].isWater();
         PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
                 .instanceId(curId)
                 .unitDefId(unitDefId)
@@ -2274,6 +2316,7 @@ public class PgGameEngine {
                 .movePointsUsed(0)
                 .moved(false)
                 .attacked(false)
+                .inSeaTransport(!def.isAir() && !def.isNaval() && onWater)
                 .facingLeft(false)
                 .customTitle(curId + ". " + def.name)
                 .build();

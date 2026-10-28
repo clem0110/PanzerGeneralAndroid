@@ -385,7 +385,7 @@ public class PgMapView extends View {
 
         if (engine.isDeploymentPhase) {
             PgDatabase.ActiveUnit topOcc = engine.getTopUnitAt(col, row, airModePreferred);
-            if (topOcc == null && engine.scenario.grid[col][row].isDeployHex && !engine.unplacedCoreUnits.isEmpty()) {
+            if (topOcc == null && engine.isHexValidForCoreDeployment(col, row) && !engine.unplacedCoreUnits.isEmpty()) {
                 if (listener != null) {
                     listener.onDeployHexTapped(col, row);
                 }
