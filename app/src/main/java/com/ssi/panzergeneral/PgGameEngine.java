@@ -242,7 +242,6 @@ public class PgGameEngine {
         if (hasExistingCoreArmy) {
             this.isDeploymentPhase = true;
             for (PgDatabase.ActiveUnit core : coreUnits) {
-                core.battlesFought++;
                 PgDatabase.UnitDef def = db.equipment.get(core.unitDefId);
                 core.movePointsUsed = 0;
                 core.moved = false;
@@ -1783,7 +1782,6 @@ public class PgGameEngine {
         int fullReward = (enemyBasePrestige * (defender.getStars() + 1)) / 2;
 
         if (rep.defenderDestroyed) {
-            recordConfirmedKill(attacker, dDef, defender.inSeaTransport);
             units.remove(defender);
             if (attacker.isAxis) axisPrestige += fullReward;
             else alliedPrestige += fullReward;
@@ -1811,7 +1809,6 @@ public class PgGameEngine {
             rep.defenderDestroyed = true;
             rep.defenderLosses = rep.defenderStartStr;
             defender.strength = 0;
-            recordConfirmedKill(attacker, dDef, defender.inSeaTransport);
             units.remove(defender);
             if (attacker.isAxis) axisPrestige += fullReward;
             else alliedPrestige += fullReward;
@@ -1865,7 +1862,6 @@ public class PgGameEngine {
                 rep.defenderDestroyed = true;
                 rep.defenderLosses = rep.defenderStartStr;
                 defender.strength = 0;
-                recordConfirmedKill(attacker, dDef, defender.inSeaTransport);
                 units.remove(defender);
                 if (attacker.isAxis) axisPrestige += fullReward;
                 else alliedPrestige += fullReward;
@@ -1877,7 +1873,6 @@ public class PgGameEngine {
         }
 
         if (rep.attackerDestroyed) {
-            recordConfirmedKill(defender, aDef, attacker.inSeaTransport);
             units.remove(attacker);
             int atkBasePrestige = Math.max(1, aDef.cost / 10);
             int atkFullReward = (atkBasePrestige * (attacker.getStars() + 1)) / 2;
@@ -1888,23 +1883,6 @@ public class PgGameEngine {
         recalculateFogOfWar();
         checkVictoryConditions();
         return rep;
-    }
-
-    private void recordConfirmedKill(PgDatabase.ActiveUnit victor, PgDatabase.UnitDef victimDef, boolean inSea) {
-        if (victor == null || victimDef == null) return;
-        victor.kills++;
-        if (victimDef.unitClass == PgDatabase.CLASS_TANK) {
-            victor.tankKills++;
-        } else if (victimDef.unitClass == PgDatabase.CLASS_INFANTRY) {
-            victor.infantryKills++;
-        } else if (victimDef.unitClass == PgDatabase.CLASS_ARTILLERY || victimDef.unitClass == PgDatabase.CLASS_AIR_DEFENSE
-                || victimDef.unitClass == PgDatabase.CLASS_ANTI_TANK || victimDef.unitClass == PgDatabase.CLASS_ANTI_AIR) {
-            victor.gunKills++;
-        } else if (victimDef.isAir()) {
-            victor.airKills++;
-        } else if (victimDef.isNaval() || inSea) {
-            victor.navalKills++;
-        }
     }
 
     private PgDatabase.ActiveUnit findAirInterceptorOrFlak(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {

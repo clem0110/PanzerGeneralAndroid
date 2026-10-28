@@ -475,7 +475,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             if (engine.isDeploymentPhase) {
                 confirmStartBattle();
             } else {
-                confirmEndTurn();
+                performEndTurn();
             }
         });
         bottomBar.addView(btnEndTurn);
@@ -801,37 +801,6 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     public void onDeployHexTapped(int col, int row) {
         if (!engine.isDeploymentPhase) return;
         showCoreDeploymentDialogForHex(col, row);
-    }
-
-    @Override
-    public void onUnitLongPressed(PgDatabase.ActiveUnit unit) {
-        if (unit != null) {
-            sounds.playSelect();
-            showUnitDossierDialog(unit);
-        }
-    }
-
-    private void confirmEndTurn() {
-        int unmovedCount = 0;
-        for (PgDatabase.ActiveUnit u : engine.units) {
-            if (engine.hasAvailableAction(u)) {
-                unmovedCount++;
-            }
-        }
-
-        if (unmovedCount > 0) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Unmoved Units Warning")
-                    .setMessage(String.format(Locale.ROOT,
-                            "You have %d unit%s with available actions this turn.\n\nDo you want to end your turn now or review remaining units?",
-                            unmovedCount, unmovedCount == 1 ? "" : "s"))
-                    .setPositiveButton("End Turn", (d, w) -> performEndTurn())
-                    .setNeutralButton("Next Unit", (d, w) -> selectNextUnmovedUnit())
-                    .setNegativeButton("Cancel", null)
-                    .show();
-        } else {
-            performEndTurn();
-        }
     }
 
     private void confirmStartBattle() {
@@ -1989,136 +1958,56 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void showActiveUnitActionsModal(PgDatabase.ActiveUnit u) {
-        showUnitDossierDialog(u);
-    }
-
-    private void showUnitDossierDialog(PgDatabase.ActiveUnit u) {
         if (u == null) return;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-        PgDatabase.HexCell cell = (engine.scenario != null && u.col >= 0 && u.col < engine.scenario.cols && u.row >= 0 && u.row < engine.scenario.rows)
-                ? engine.scenario.grid[u.col][u.row] : null;
+        PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
 
-        ScrollView scroll = new ScrollView(this);
         LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(32, 24, 32, 24);
-
-        // Header: Unit Portrait + Name + Branch
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setPadding(32, 20, 32, 20);
+        box.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView iv = new ImageView(this);
         iv.setImageBitmap(assets.createUnitPortrait(engine.getEffectiveIconId(u), def.unitClass, 210, 134));
-        header.addView(iv, new LinearLayout.LayoutParams(210, 134));
+        box.addView(iv, new LinearLayout.LayoutParams(210, 134));
 
-        LinearLayout headText = new LinearLayout(this);
-        headText.setOrientation(LinearLayout.VERTICAL);
-        headText.setPadding(24, 0, 0, 0);
-
-        TextView tvName = new TextView(this);
-        tvName.setTextColor(0xFFFFD54F);
-        tvName.setTextSize(16.5f);
-        tvName.setTypeface(Typeface.DEFAULT_BOLD);
-        String sideStr = u.isAxis ? (u.isCore ? "★ AXIS CORE DIVISION" : "AXIS AUXILIARY CORPS") : "ALLIED DIVISION";
-        tvName.setText((u.customTitle != null ? u.customTitle : def.name) + "\n" + sideStr);
-        headText.addView(tvName);
-
-        TextView tvExp = new TextView(this);
-        tvExp.setTextColor(Color.WHITE);
-        tvExp.setTextSize(12f);
-        tvExp.setText(String.format(Locale.ROOT, "Strength: %d / %d (Sup:%d)  •  Experience: %d (%d★)",
-                u.strength, u.getMaxOverstrength(), u.suppression, u.experience, u.getStars()));
-        headText.addView(tvExp);
-
-        header.addView(headText);
-        box.addView(header);
-
-        // Tactical Specifications Section
-        TextView tvStatsTitle = new TextView(this);
-        tvStatsTitle.setPadding(0, 18, 0, 4);
-        tvStatsTitle.setTextColor(0xFF90CAF9);
-        tvStatsTitle.setTextSize(13.5f);
-        tvStatsTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        tvStatsTitle.setText("COMBAT SPECIFICATIONS & RECON:");
-        box.addView(tvStatsTitle);
-
+        TextView tv = new TextView(this);
+        tv.setPadding(24, 0, 0, 0);
+        tv.setTextSize(13.5f);
         PgDatabase.UnitDef effDef = engine.getEffectiveUnitDef(u);
         String cls = (effDef.unitClass >= 0 && effDef.unitClass < PgDatabase.CLASS_NAMES.length)
                 ? PgDatabase.CLASS_NAMES[effDef.unitClass] : "Unit";
+        String specialRules = "";
+        if (u.mountedInTransport && u.transportDefId > 0) specialRules = "\n• Status: Mounted in Transport (" + effDef.name + "). Moving and attacking using transport stats.";
+        else if (def.unitClass == PgDatabase.CLASS_TANK) specialRules = "\n• Special: Tank Overrun (destroying weak unit with 0 losses grants bonus move & attack)";
+        else if (def.isBridgeEngineer()) specialRules = "\n• Special: Bridge Engineer (forms pontoon bridge on River hexes; ignores Rugged Defense)";
+        else if (def.isPioneerOrEngineer()) specialRules = "\n• Special: Combat Pioneer (ignores enemy Rugged Defense; strips 2x entrenchment)";
+        else if (def.unitClass == PgDatabase.CLASS_RECON) specialRules = "\n• Special: Recon Phased Movement & High Spotting";
+        else if (def.unitClass == PgDatabase.CLASS_ARTILLERY) specialRules = "\n• Special: Defensive Artillery Support to adjacent friendly units & Ranged Suppression";
+        else if (def.unitClass == PgDatabase.CLASS_FIGHTER) specialRules = "\n• Special: Air Interceptor (protects adjacent friendly units from enemy bombers)";
+        else if (def.unitClass == PgDatabase.CLASS_LEVEL_BOMBER) specialRules = "\n• Special: Strategic Bombardment (destroys enemy fuel/ammo & strips entrenchment)";
 
-        String locStr = cell != null ? String.format(Locale.ROOT, "Hex (%d,%d) %s [%s • Entrenchment: %d]",
-                u.col, u.row, cell.name, cell.getTerrainName(), u.entrenchment) : "Reserve Deployment Pool";
-
-        TextView tvStats = new TextView(this);
-        tvStats.setTextColor(0xFFECEFF1);
-        tvStats.setTextSize(12f);
-        tvStats.setText(String.format(Locale.ROOT,
-                "Class: %s  •  Location: %s\n" +
-                "Attacks:  Soft: %d   Hard: %d   Air: %d   Naval: %d\n" +
-                "Defense:  Ground: %d   Air: %d   Close: %d\n" +
-                "Tactics:  Initiative: %d   Range: %d   Movement: %d/%d   Ammo: %s   Fuel: %s",
-                cls, locStr,
-                effDef.softAttack, effDef.hardAttack, effDef.airAttack, effDef.navalAttack,
-                effDef.groundDefense, effDef.airDefense, effDef.closeDefense,
-                effDef.initiative, effDef.range,
+        tv.setText(String.format(Locale.ROOT,
+                "Unit: %s (%s)\n" +
+                "Strength: %d / %d (Suppression: %d)  •  Experience: %d (%d★)\n" +
+                "Location: Hex (%d,%d) %s [%s • Entrenchment: %d • Ini Cap: %s]\n" +
+                "Movement: %d / %d  •  Ammo: %s  •  Fuel: %s\n" +
+                "Combat: SA:%d  HA:%d  AA:%d  NA:%d  |  GD:%d  AD:%d  CD:%d  Ini:%d%s",
+                u.customTitle != null ? u.customTitle : def.name, cls,
+                u.strength, u.getMaxOverstrength(), u.suppression, u.experience, u.getStars(),
+                u.col, u.row, cell.name, cell.getTerrainName(), u.entrenchment,
+                cell.getInitiativeCap() >= 99 ? "Uncapped" : String.valueOf(cell.getInitiativeCap()),
                 engine.getRemainingMovementPoints(u), engine.getMaxMovementPoints(u),
                 engine.supplyEnabled ? String.valueOf(u.ammo) : "∞",
-                engine.supplyEnabled ? String.valueOf(u.fuel) : "∞"));
-        box.addView(tvStats);
-
-        // Service Record & Confirmed Kills Section
-        TextView tvHonorsTitle = new TextView(this);
-        tvHonorsTitle.setPadding(0, 18, 0, 4);
-        tvHonorsTitle.setTextColor(0xFFFFD54F);
-        tvHonorsTitle.setTextSize(13.5f);
-        tvHonorsTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        tvHonorsTitle.setText("SERVICE RECORD & BATTLE HONORS:");
-        box.addView(tvHonorsTitle);
-
-        TextView tvKills = new TextView(this);
-        tvKills.setTextColor(0xFFECEFF1);
-        tvKills.setTextSize(12f);
-        tvKills.setText(String.format(Locale.ROOT,
-                "Battles Fought: %d   |   Total Confirmed Kills: %d\n" +
-                "• Tanks & Armor: %d\n" +
-                "• Infantry: %d\n" +
-                "• Artillery & Anti-Tank Guns: %d\n" +
-                "• Aircraft: %d\n" +
-                "• Naval Ships: %d",
-                u.battlesFought, u.kills,
-                u.tankKills, u.infantryKills, u.gunKills, u.airKills, u.navalKills));
-        box.addView(tvKills);
-
-        // Military Citations & Awards Section
-        TextView tvAwardsTitle = new TextView(this);
-        tvAwardsTitle.setPadding(0, 16, 0, 4);
-        tvAwardsTitle.setTextColor(0xFFFFCA28);
-        tvAwardsTitle.setTextSize(13.5f);
-        tvAwardsTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        tvAwardsTitle.setText("MILITARY DECORATIONS & CITATIONS:");
-        box.addView(tvAwardsTitle);
-
-        List<String> awards = u.getAwards();
-        TextView tvAwards = new TextView(this);
-        tvAwards.setTextColor(0xFFE0E0E0);
-        tvAwards.setTextSize(12f);
-        if (awards.isEmpty()) {
-            tvAwards.setText("No combat citations yet. Requires 5+ confirmed kills to earn the Iron Cross.");
-        } else {
-            StringBuilder sb = new StringBuilder();
-            for (String aw : awards) {
-                sb.append("★ ").append(aw).append("\n");
-            }
-            tvAwards.setText(sb.toString().trim());
-        }
-        box.addView(tvAwards);
-
-        scroll.addView(box);
+                engine.supplyEnabled ? String.valueOf(u.fuel) : "∞",
+                effDef.softAttack, effDef.hardAttack, effDef.airAttack, effDef.navalAttack,
+                effDef.groundDefense, effDef.airDefense, effDef.closeDefense, effDef.initiative,
+                specialRules));
+        box.addView(tv);
 
         AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle((u.isAxis ? "Service Dossier — " : "Intelligence Report — ") + def.name);
-        b.setView(scroll);
+        b.setTitle((u.isAxis ? "Axis Unit Dossier — " : "Allied Intelligence Report — ") + def.name);
+        b.setView(box);
         if (engine.canUpgradeUnit(u)) {
             b.setPositiveButton("Upgrade Equipment", (d, w) -> showUpgradeUnitDialog(u));
         }

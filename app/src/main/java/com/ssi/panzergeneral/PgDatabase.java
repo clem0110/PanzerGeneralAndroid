@@ -262,25 +262,6 @@ public class PgDatabase {
         public String customTitle;
         public int aiOrder; // 0 = hunter/maneuver, 1 = hold objective/hex, 2 = patrol
 
-        // Combat history & unit dossier (OpenPanzer-style unit service record)
-        public int kills;
-        public int tankKills;
-        public int infantryKills;
-        public int gunKills;
-        public int airKills;
-        public int navalKills;
-        public int battlesFought;
-
-        public List<String> getAwards() {
-            List<String> list = new ArrayList<>();
-            if (kills >= 3) list.add("Iron Cross 2nd Class");
-            if (kills >= 7) list.add("Iron Cross 1st Class");
-            if (kills >= 12) list.add("Knight's Cross");
-            if (kills >= 20) list.add("Knight's Cross with Oak Leaves");
-            if (kills >= 30) list.add("Knight's Cross with Swords");
-            return list;
-        }
-
         public int getStars() {
             return Math.min(5, experience / 100);
         }

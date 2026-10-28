@@ -16,7 +16,6 @@ public class PgMapView extends View {
         void onPurchasePlacementRequested(int col, int row);
         void onCoreUnitDeployRequested(PgDatabase.ActiveUnit unit, int col, int row);
         void onDeployHexTapped(int col, int row);
-        void onUnitLongPressed(PgDatabase.ActiveUnit unit);
     }
 
     // Original Panzer General TACMAP.SHP sprite dimensions: 60x50
@@ -56,21 +55,6 @@ public class PgMapView extends View {
     public PgDatabase.ActiveUnit selectedUnit = null;
     public Map<Integer, Integer> reachableHexes = new HashMap<>();
     public List<PgDatabase.ActiveUnit> validTargets = new ArrayList<>();
-
-    // Movement path & fuel consumption preview state
-    public int pendingMoveCol = -1;
-    public int pendingMoveRow = -1;
-
-    // Pre-combat prediction & confirmation overlay state
-    public PgDatabase.ActiveUnit pendingCombatTarget = null;
-    public PgGameEngine.CombatPrediction pendingCombatPrediction = null;
-    private final RectF btnCombatAttackRect = new RectF();
-    private final RectF btnCombatCancelRect = new RectF();
-
-    // Strategic Mini-Map Radar state
-    public boolean showMiniMap = true;
-    private final RectF miniMapBounds = new RectF();
-    private final RectF miniMapToggleRect = new RectF();
 
     // Explosion animation state
     private int animCol = -1, animRow = -1;
@@ -156,23 +140,6 @@ public class PgMapView extends View {
                 }
                 handleTap(e.getX(), e.getY());
                 return true;
-            }
-
-            @Override
-            public void onLongPress(MotionEvent e) {
-                if (strategicMapOverlay || engine == null || engine.scenario == null) return;
-                float worldX = (e.getX() - panX) / scale;
-                float worldY = (e.getY() - panY) / scale;
-                int[] hex = pixelToHex(worldX, worldY);
-                if (hex != null) {
-                    PgDatabase.ActiveUnit u = engine.getTopUnitAt(hex[0], hex[1], airModePreferred);
-                    if (u != null && engine.isUnitVisibleToPlayer(u)) {
-                        sounds.playSelect();
-                        if (listener != null) {
-                            listener.onUnitLongPressed(u);
-                        }
-                    }
-                }
             }
         });
     }
@@ -312,10 +279,6 @@ public class PgMapView extends View {
         selectedUnit = null;
         reachableHexes.clear();
         validTargets.clear();
-        pendingMoveCol = -1;
-        pendingMoveRow = -1;
-        pendingCombatTarget = null;
-        pendingCombatPrediction = null;
         if (listener != null && engine != null && engine.scenario != null) {
             listener.onHexSelected(-1, -1, null, null);
         }
@@ -330,10 +293,6 @@ public class PgMapView extends View {
         selectedCol = u.col;
         selectedRow = u.row;
         selectedUnit = u;
-        pendingMoveCol = -1;
-        pendingMoveRow = -1;
-        pendingCombatTarget = null;
-        pendingCombatPrediction = null;
         if (u.isAxis && engine.isPlayerTurn && !engine.isDeploymentPhase) {
             reachableHexes = engine.getReachableHexes(u);
             validTargets = engine.getValidTargets(u);
@@ -347,53 +306,6 @@ public class PgMapView extends View {
             listener.onHexSelected(u.col, u.row, cell, u);
         }
         invalidate();
-    }
-
-    private void commitAttack(PgDatabase.ActiveUnit target) {
-        if (selectedUnit == null || target == null) return;
-        PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(selectedUnit);
-        sounds.playCombatSound(aDef);
-        int col = target.col;
-        int row = target.row;
-        PgGameEngine.CombatReport rep = engine.executeCombat(selectedUnit, target);
-        triggerExplosion(col, row, rep);
-        pendingCombatTarget = null;
-        pendingCombatPrediction = null;
-        pendingMoveCol = -1;
-        pendingMoveRow = -1;
-        if (selectedUnit.strength > 0) {
-            selectUnit(selectedUnit);
-        } else {
-            clearSelection();
-        }
-        if (listener != null) {
-            listener.onCombatInitiated(selectedUnit, target, rep);
-        }
-    }
-
-    private void commitMove(int col, int row) {
-        if (selectedUnit == null) return;
-        PgDatabase.UnitDef def = engine.db.equipment.get(selectedUnit.unitDefId);
-        pendingMoveCol = -1;
-        pendingMoveRow = -1;
-        pendingCombatTarget = null;
-        pendingCombatPrediction = null;
-        if (engine.moveUnit(selectedUnit, col, row)) {
-            if (engine.lastSurpriseReport != null) {
-                sounds.playCombatSound(def);
-                triggerExplosion(col, row, engine.lastSurpriseReport);
-            } else {
-                sounds.playMoveSound(def);
-            }
-            if (selectedUnit.strength > 0) {
-                selectUnit(selectedUnit);
-            } else {
-                clearSelection();
-            }
-            if (listener != null) {
-                listener.onUnitMoved(selectedUnit, col, row);
-            }
-        }
     }
 
     public void triggerExplosion(int col, int row, PgGameEngine.CombatReport rep) {
@@ -451,41 +363,6 @@ public class PgMapView extends View {
             return;
         }
 
-        // Screen-space UI controls: Mini-Map Radar and Combat Prediction Overlay
-        if (miniMapToggleRect.contains(screenX, screenY)) {
-            sounds.playClick();
-            showMiniMap = !showMiniMap;
-            invalidate();
-            return;
-        }
-
-        if (showMiniMap && miniMapBounds.contains(screenX, screenY)) {
-            float cellW = miniMapBounds.width() / engine.scenario.cols;
-            float cellH = miniMapBounds.height() / engine.scenario.rows;
-            int c = (int) ((screenX - miniMapBounds.left) / cellW);
-            int r = (int) ((screenY - miniMapBounds.top) / cellH);
-            if (c >= 0 && c < engine.scenario.cols && r >= 0 && r < engine.scenario.rows) {
-                sounds.playClick();
-                centerOnHex(c, r);
-            }
-            return;
-        }
-
-        if (pendingCombatTarget != null && pendingCombatPrediction != null) {
-            if (btnCombatAttackRect.contains(screenX, screenY)) {
-                PgDatabase.ActiveUnit t = pendingCombatTarget;
-                commitAttack(t);
-                return;
-            }
-            if (btnCombatCancelRect.contains(screenX, screenY)) {
-                sounds.playClick();
-                pendingCombatTarget = null;
-                pendingCombatPrediction = null;
-                invalidate();
-                return;
-            }
-        }
-
         float worldX = (screenX - panX) / scale;
         float worldY = (screenY - panY) / scale;
         int[] hex = pixelToHex(worldX, worldY);
@@ -520,17 +397,17 @@ public class PgMapView extends View {
         if (selectedUnit != null && selectedUnit.isAxis && engine.isPlayerTurn) {
             for (PgDatabase.ActiveUnit target : validTargets) {
                 if (target.col == col && target.row == row) {
-                    if (pendingCombatTarget == target) {
-                        // 2nd tap confirms attack strike!
-                        commitAttack(target);
+                    PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(selectedUnit);
+                    sounds.playCombatSound(aDef);
+                    PgGameEngine.CombatReport rep = engine.executeCombat(selectedUnit, target);
+                    triggerExplosion(col, row, rep);
+                    if (selectedUnit.strength > 0) {
+                        selectUnit(selectedUnit);
                     } else {
-                        // 1st tap previews expected losses, initiative & support
-                        pendingCombatTarget = target;
-                        pendingCombatPrediction = engine.predictCombat(selectedUnit, target);
-                        pendingMoveCol = -1;
-                        pendingMoveRow = -1;
-                        sounds.playSelect();
-                        invalidate();
+                        clearSelection();
+                    }
+                    if (listener != null) {
+                        listener.onCombatInitiated(selectedUnit, target, rep);
                     }
                     return;
                 }
@@ -539,27 +416,26 @@ public class PgMapView extends View {
             // 2. Check if tapping a reachable movement hex
             int key = row * engine.scenario.cols + col;
             if (reachableHexes.containsKey(key) && (col != selectedUnit.col || row != selectedUnit.row)) {
-                if (pendingMoveCol == col && pendingMoveRow == row) {
-                    // 2nd tap confirms unit movement!
-                    commitMove(col, row);
-                } else {
-                    // 1st tap previews movement path trajectory & fuel
-                    pendingMoveCol = col;
-                    pendingMoveRow = row;
-                    pendingCombatTarget = null;
-                    pendingCombatPrediction = null;
-                    sounds.playClick();
-                    invalidate();
+                PgDatabase.UnitDef def = engine.db.equipment.get(selectedUnit.unitDefId);
+                if (engine.moveUnit(selectedUnit, col, row)) {
+                    if (engine.lastSurpriseReport != null) {
+                        sounds.playCombatSound(def);
+                        triggerExplosion(col, row, engine.lastSurpriseReport);
+                    } else {
+                        sounds.playMoveSound(def);
+                    }
+                    if (selectedUnit.strength > 0) {
+                        selectUnit(selectedUnit);
+                    } else {
+                        clearSelection();
+                    }
+                    if (listener != null) {
+                        listener.onUnitMoved(selectedUnit, col, row);
+                    }
+                    return;
                 }
-                return;
             }
         }
-
-        // Clear pending preview states when tapping elsewhere
-        pendingMoveCol = -1;
-        pendingMoveRow = -1;
-        pendingCombatTarget = null;
-        pendingCombatPrediction = null;
 
         // 3. If clicking a unit or hex that is already selected, remove the selection
         if ((selectedUnit != null && selectedUnit.col == col && selectedUnit.row == row)
@@ -678,11 +554,8 @@ public class PgMapView extends View {
                 boolean visible = !engine.fogOfWarEnabled || engine.visibleHexes[c][r];
                 if (!visible) {
                     buildHexPath(x, y);
-                    highlightFillPaint.setColor(0x8C0B1119); // Atmospheric deep slate tactical fog shroud
+                    highlightFillPaint.setColor(0x66000000);
                     canvas.drawPath(hexPath, highlightFillPaint);
-                    hexStrokePaint.setColor(0x38000000);
-                    hexStrokePaint.setStrokeWidth(1.2f);
-                    canvas.drawPath(hexPath, hexStrokePaint);
                 }
 
                 // Draw subtle hex outline if enabled in Preferences
@@ -855,21 +728,10 @@ public class PgMapView extends View {
             postInvalidateDelayed(40);
         }
 
-        // Pass 5: Draw Movement Trajectory Path & Fuel/MP Preview if pending move active
-        if (selectedUnit != null && pendingMoveCol >= 0 && pendingMoveRow >= 0) {
-            drawMovementPreview(canvas);
-        }
-
         canvas.restore();
 
         if (!strategicMapOverlay) {
             drawZoomControls(canvas);
-            drawMiniMapRadar(canvas);
-        }
-
-        // Draw Pre-Combat Prediction Confirmation Overlay Card if active
-        if (selectedUnit != null && pendingCombatTarget != null && pendingCombatPrediction != null) {
-            drawCombatPredictionOverlay(canvas);
         }
 
         // Draw floating combat report banner if recent
@@ -1056,245 +918,6 @@ public class PgMapView extends View {
             badgePaint.setColor(u.isAxis ? 0xFFECEFF1 : 0xFFFF5252);
             canvas.drawCircle(cx, cy, Math.max(3f, cellW * 0.35f), badgePaint);
         }
-    }
-
-    private void drawMovementPreview(Canvas canvas) {
-        if (selectedUnit == null || pendingMoveCol < 0 || pendingMoveRow < 0) return;
-        float sx = selectedUnit.col * COL_STEP + TILE_W * 0.5f;
-        float sy = selectedUnit.row * ROW_STEP + ((selectedUnit.col & 1) != 0 ? ODD_OFFSET_Y : 0f) + TILE_H * 0.5f;
-        float ex = pendingMoveCol * COL_STEP + TILE_W * 0.5f;
-        float ey = pendingMoveRow * ROW_STEP + ((pendingMoveCol & 1) != 0 ? ODD_OFFSET_Y : 0f) + TILE_H * 0.5f;
-
-        // Destination hex highlight
-        buildHexPath(pendingMoveCol * COL_STEP, pendingMoveRow * ROW_STEP + ((pendingMoveCol & 1) != 0 ? ODD_OFFSET_Y : 0f));
-        highlightFillPaint.setColor(0x5500E5FF);
-        canvas.drawPath(hexPath, highlightFillPaint);
-        hexStrokePaint.setColor(0xFF00E5FF);
-        hexStrokePaint.setStrokeWidth(2.6f);
-        canvas.drawPath(hexPath, hexStrokePaint);
-
-        // Trajectory line
-        hexStrokePaint.setColor(0xFF00E5FF);
-        hexStrokePaint.setStrokeWidth(3.5f);
-        canvas.drawLine(sx, sy, ex, ey, hexStrokePaint);
-
-        // Trajectory arrow head
-        float angle = (float) Math.atan2(ey - sy, ex - sx);
-        float arrowLen = 13f;
-        float a1 = angle + (float) Math.PI * 0.82f;
-        float a2 = angle - (float) Math.PI * 0.82f;
-        canvas.drawLine(ex, ey, ex + (float) Math.cos(a1) * arrowLen, ey + (float) Math.sin(a1) * arrowLen, hexStrokePaint);
-        canvas.drawLine(ex, ey, ex + (float) Math.cos(a2) * arrowLen, ey + (float) Math.sin(a2) * arrowLen, hexStrokePaint);
-
-        // Floating badge on destination hex
-        int dist = engine.hexDistance(selectedUnit.col, selectedUnit.row, pendingMoveCol, pendingMoveRow);
-        String fuelStr = (engine.supplyEnabled && selectedUnit.fuel > 0) ? " • Fuel:" + Math.max(0, selectedUnit.fuel - dist) : "";
-        badgePaint.setColor(0xEE121E16);
-        RectF bRect = new RectF(ex - 44f, ey - 22f, ex + 44f, ey - 7f);
-        canvas.drawRoundRect(bRect, 4f, 4f, badgePaint);
-        hexStrokePaint.setColor(0xFF00E5FF);
-        hexStrokePaint.setStrokeWidth(1.2f);
-        canvas.drawRoundRect(bRect, 4f, 4f, hexStrokePaint);
-        textPaint.setColor(0xFFE0F7FA);
-        textPaint.setTextSize(7.5f);
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        canvas.drawText("MOVE (2nd Tap)" + fuelStr, ex, ey - 12f, textPaint);
-    }
-
-    private void drawCombatPredictionOverlay(Canvas canvas) {
-        if (selectedUnit == null || pendingCombatTarget == null || pendingCombatPrediction == null) return;
-        float cardW = Math.min(540f, getWidth() * 0.88f);
-        float cardH = 155f;
-        float cx = (getWidth() - cardW) * 0.5f;
-        float cy = 76f;
-
-        // Card background
-        badgePaint.setColor(0xF4141B16);
-        RectF cardRect = new RectF(cx, cy, cx + cardW, cy + cardH);
-        canvas.drawRoundRect(cardRect, 12f, 12f, badgePaint);
-        hexStrokePaint.setColor(0xFFC5A059);
-        hexStrokePaint.setStrokeWidth(2.2f);
-        canvas.drawRoundRect(cardRect, 12f, 12f, hexStrokePaint);
-
-        // Inner frame
-        RectF inner = new RectF(cx + 3f, cy + 3f, cx + cardW - 3f, cy + cardH - 3f);
-        hexStrokePaint.setColor(0x60C5A059);
-        hexStrokePaint.setStrokeWidth(1.0f);
-        canvas.drawRoundRect(inner, 10f, 10f, hexStrokePaint);
-
-        // Title Header
-        textPaint.setColor(0xFFFFD54F);
-        textPaint.setTextSize(13f);
-        textPaint.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        canvas.drawText("★ COMBAT PREDICTION OVERLAY ★", cx + cardW * 0.5f, cy + 19f, textPaint);
-
-        // Attacker Info (Left)
-        PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(selectedUnit);
-        Bitmap aBmp = assets.getSprite("TACICONS.SHP", engine.getEffectiveIconId(selectedUnit), selectedUnit.facingLeft);
-        if (aBmp != null) {
-            canvas.drawBitmap(aBmp, cx + 12f, cy + 26f, bitmapPaint);
-        }
-        textPaint.setTextAlign(Paint.Align.LEFT);
-        textPaint.setColor(Color.WHITE);
-        textPaint.setTextSize(12.5f);
-        canvas.drawText(aDef.name, cx + 76f, cy + 38f, textPaint);
-
-        textPaint.setColor(0xFFFFE57F);
-        textPaint.setTextSize(11f);
-        canvas.drawText(String.format(Locale.ROOT, "Str: %d   Ini: %d", selectedUnit.strength, pendingCombatPrediction.effectiveAttackerIni), cx + 76f, cy + 54f, textPaint);
-
-        textPaint.setColor(pendingCombatPrediction.expectedAttackerLosses > 0 ? 0xFFFF5252 : 0xFF69F0AE);
-        textPaint.setTextSize(12.5f);
-        canvas.drawText(String.format(Locale.ROOT, "Losses: -%d", pendingCombatPrediction.expectedAttackerLosses), cx + 76f, cy + 70f, textPaint);
-
-        // Defender Info (Right)
-        PgDatabase.UnitDef dDef = engine.getEffectiveUnitDef(pendingCombatTarget);
-        Bitmap dBmp = assets.getSprite("TACICONS.SHP", engine.getEffectiveIconId(pendingCombatTarget), pendingCombatTarget.facingLeft);
-        if (dBmp != null) {
-            canvas.drawBitmap(dBmp, cx + cardW - 72f, cy + 26f, bitmapPaint);
-        }
-        textPaint.setTextAlign(Paint.Align.RIGHT);
-        textPaint.setColor(Color.WHITE);
-        textPaint.setTextSize(12.5f);
-        canvas.drawText(dDef.name, cx + cardW - 78f, cy + 38f, textPaint);
-
-        textPaint.setColor(0xFFFFE57F);
-        textPaint.setTextSize(11f);
-        canvas.drawText(String.format(Locale.ROOT, "Str: %d   Ini: %d", pendingCombatTarget.strength, pendingCombatPrediction.effectiveDefenderIni), cx + cardW - 78f, cy + 54f, textPaint);
-
-        textPaint.setColor(0xFFFF5252);
-        textPaint.setTextSize(12.5f);
-        canvas.drawText(String.format(Locale.ROOT, "Losses: -%d", pendingCombatPrediction.expectedDefenderLosses), cx + cardW - 78f, cy + 70f, textPaint);
-
-        // Center VS
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setColor(0xFFFFD54F);
-        textPaint.setTextSize(14f);
-        canvas.drawText("VS", cx + cardW * 0.5f, cy + 54f, textPaint);
-
-        // Warnings and Combat Support
-        StringBuilder cond = new StringBuilder();
-        if (pendingCombatPrediction.ruggedDefenseChance) cond.append("⚠ RUGGED DEFENSE ");
-        if (pendingCombatPrediction.artillerySupport) cond.append("• ARTY SUPPORT ");
-        if (pendingCombatPrediction.fighterInterceptor) cond.append("• AIR INTERCEPT ");
-        if (cond.length() > 0) {
-            textPaint.setColor(0xFFFF8A80);
-            textPaint.setTextSize(10.5f);
-            canvas.drawText(cond.toString().trim(), cx + cardW * 0.5f, cy + 90f, textPaint);
-        }
-
-        // Action Buttons
-        float btnW = cardW * 0.44f;
-        float btnH = 36f;
-        btnCombatAttackRect.set(cx + 20f, cy + 106f, cx + 20f + btnW, cy + 106f + btnH);
-        badgePaint.setColor(0xFFB71C1C);
-        canvas.drawRoundRect(btnCombatAttackRect, 8f, 8f, badgePaint);
-        hexStrokePaint.setColor(0xFFFFD54F);
-        hexStrokePaint.setStrokeWidth(1.5f);
-        canvas.drawRoundRect(btnCombatAttackRect, 8f, 8f, hexStrokePaint);
-        textPaint.setColor(0xFFFFD54F);
-        textPaint.setTextSize(12.5f);
-        canvas.drawText("⚔ FIRE / ATTACK", btnCombatAttackRect.centerX(), btnCombatAttackRect.centerY() + 4.5f, textPaint);
-
-        btnCombatCancelRect.set(cx + cardW - 20f - btnW, cy + 106f, cx + cardW - 20f, cy + 106f + btnH);
-        badgePaint.setColor(0xFF37474F);
-        canvas.drawRoundRect(btnCombatCancelRect, 8f, 8f, badgePaint);
-        hexStrokePaint.setColor(0xFF90A4AE);
-        hexStrokePaint.setStrokeWidth(1.2f);
-        canvas.drawRoundRect(btnCombatCancelRect, 8f, 8f, hexStrokePaint);
-        textPaint.setColor(0xFFECEFF1);
-        textPaint.setTextSize(12.5f);
-        canvas.drawText("✕ CANCEL", btnCombatCancelRect.centerX(), btnCombatCancelRect.centerY() + 4.5f, textPaint);
-    }
-
-    private void drawMiniMapRadar(Canvas canvas) {
-        if (engine.scenario == null) return;
-        float mx = 12f;
-        float mw = 148f;
-        float mh = 98f;
-        float my = getHeight() - mh - 76f;
-
-        // Toggle button pill
-        miniMapToggleRect.set(mx, my - 24f, mx + 68f, my - 3f);
-        badgePaint.setColor(0xD91B241D);
-        canvas.drawRoundRect(miniMapToggleRect, 6f, 6f, badgePaint);
-        hexStrokePaint.setColor(0xFFC5A059);
-        hexStrokePaint.setStrokeWidth(1.2f);
-        canvas.drawRoundRect(miniMapToggleRect, 6f, 6f, hexStrokePaint);
-        textPaint.setColor(0xFFFFD54F);
-        textPaint.setTextSize(9.5f);
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        canvas.drawText(showMiniMap ? "RADAR ▲" : "RADAR ▼", miniMapToggleRect.centerX(), miniMapToggleRect.centerY() + 3.5f, textPaint);
-
-        if (!showMiniMap) return;
-
-        miniMapBounds.set(mx, my, mx + mw, my + mh);
-        badgePaint.setColor(0xDD101712);
-        canvas.drawRoundRect(miniMapBounds, 8f, 8f, badgePaint);
-        hexStrokePaint.setColor(0xFF8D733F);
-        hexStrokePaint.setStrokeWidth(1.6f);
-        canvas.drawRoundRect(miniMapBounds, 8f, 8f, hexStrokePaint);
-
-        int cols = engine.scenario.cols;
-        int rows = engine.scenario.rows;
-        float cw = mw / cols;
-        float ch = mh / rows;
-
-        for (int c = 0; c < cols; c++) {
-            for (int r = 0; r < rows; r++) {
-                PgDatabase.HexCell cell = engine.scenario.grid[c][r];
-                int color;
-                switch (cell.terrainType) {
-                    case 2: color = 0xFF1B4368; break; // Ocean
-                    case 4: color = 0xFF2A6A9E; break; // River
-                    case 8: case 12: color = 0xFF8E999E; break; // City/Fort
-                    case 5: color = 0xFF5D4037; break; // Mountain
-                    case 10: case 13: color = 0xFF254B1F; break; // Forest
-                    case 11: color = 0xFFB38D4A; break; // Desert
-                    default: color = 0xFF3E5A2A; break; // Clear
-                }
-                badgePaint.setColor(color);
-                canvas.drawRect(mx + c * cw, my + r * ch, mx + (c + 1) * cw, my + (r + 1) * ch, badgePaint);
-
-                if (cell.isObjective) {
-                    badgePaint.setColor(0xFFFFD700);
-                    canvas.drawCircle(mx + (c + 0.5f) * cw, my + (r + 0.5f) * ch, Math.max(2.2f, cw * 0.42f), badgePaint);
-                }
-            }
-        }
-
-        // Units
-        for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u.strength <= 0) continue;
-            float ux = mx + (u.col + 0.5f) * cw;
-            float uy = my + (u.row + 0.5f) * ch;
-            if (u.isAxis) {
-                badgePaint.setColor(0xFF00E676);
-                canvas.drawCircle(ux, uy, Math.max(2f, cw * 0.38f), badgePaint);
-            } else if (engine.isUnitVisibleToPlayer(u)) {
-                badgePaint.setColor(0xFFFF1744);
-                canvas.drawCircle(ux, uy, Math.max(2f, cw * 0.38f), badgePaint);
-            }
-        }
-
-        // Camera Viewport Rectangle
-        float vx1 = (-panX) / scale;
-        float vy1 = (-panY) / scale;
-        float vx2 = (getWidth() - panX) / scale;
-        float vy2 = (getHeight() - panY) / scale;
-        float totalW = cols * COL_STEP;
-        float totalH = rows * ROW_STEP;
-        float rvx1 = Math.max(mx, Math.min(mx + mw, mx + (vx1 / totalW) * mw));
-        float rvy1 = Math.max(my, Math.min(my + mh, my + (vy1 / totalH) * mh));
-        float rvx2 = Math.max(mx, Math.min(mx + mw, mx + (vx2 / totalW) * mw));
-        float rvy2 = Math.max(my, Math.min(my + mh, my + (vy2 / totalH) * mh));
-
-        badgePaint.setColor(0x28FFFFFF);
-        canvas.drawRect(rvx1, rvy1, rvx2, rvy2, badgePaint);
-        hexStrokePaint.setColor(0xEEFFFFFF);
-        hexStrokePaint.setStrokeWidth(1.2f);
-        canvas.drawRect(rvx1, rvy1, rvx2, rvy2, hexStrokePaint);
     }
 
     private void buildHexPath(float x, float y) {
