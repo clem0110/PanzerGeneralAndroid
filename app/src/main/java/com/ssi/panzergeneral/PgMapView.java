@@ -14,6 +14,8 @@ public class PgMapView extends View {
         void onUnitMoved(PgDatabase.ActiveUnit unit, int col, int row);
         void onCombatInitiated(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, PgGameEngine.CombatReport report);
         void onPurchasePlacementRequested(int col, int row);
+        void onCoreUnitDeployRequested(PgDatabase.ActiveUnit unit, int col, int row);
+        void onDeployHexTapped(int col, int row);
     }
 
     // Original Panzer General TACMAP.SHP sprite dimensions: 60x50
@@ -46,6 +48,7 @@ public class PgMapView extends View {
     public boolean purchasePlacementMode = false;
     public int pendingPurchaseUnitId = -1;
     public int pendingPurchaseTransportId = 0;
+    public PgDatabase.ActiveUnit pendingDeployCoreUnit = null;
 
     public int selectedCol = -1;
     public int selectedRow = -1;
@@ -290,7 +293,7 @@ public class PgMapView extends View {
         selectedCol = u.col;
         selectedRow = u.row;
         selectedUnit = u;
-        if (u.isAxis && engine.isPlayerTurn) {
+        if (u.isAxis && engine.isPlayerTurn && !engine.isDeploymentPhase) {
             reachableHexes = engine.getReachableHexes(u);
             validTargets = engine.getValidTargets(u);
         } else {
@@ -298,7 +301,9 @@ public class PgMapView extends View {
             validTargets.clear();
         }
         if (listener != null && engine.scenario != null) {
-            listener.onHexSelected(u.col, u.row, engine.scenario.grid[u.col][u.row], u);
+            PgDatabase.HexCell cell = (u.col >= 0 && u.col < engine.scenario.cols && u.row >= 0 && u.row < engine.scenario.rows)
+                    ? engine.scenario.grid[u.col][u.row] : null;
+            listener.onHexSelected(u.col, u.row, cell, u);
         }
         invalidate();
     }
@@ -369,6 +374,23 @@ public class PgMapView extends View {
                 listener.onPurchasePlacementRequested(col, row);
             }
             return;
+        }
+
+        if (pendingDeployCoreUnit != null) {
+            if (listener != null) {
+                listener.onCoreUnitDeployRequested(pendingDeployCoreUnit, col, row);
+            }
+            return;
+        }
+
+        if (engine.isDeploymentPhase) {
+            PgDatabase.ActiveUnit topOcc = engine.getTopUnitAt(col, row, airModePreferred);
+            if (topOcc == null && engine.scenario.grid[col][row].isDeployHex && !engine.unplacedCoreUnits.isEmpty()) {
+                if (listener != null) {
+                    listener.onDeployHexTapped(col, row);
+                }
+                return;
+            }
         }
 
         // 1. Check if tapping a valid attack target for currently selected friendly unit
@@ -508,6 +530,10 @@ public class PgMapView extends View {
                 ? engine.getAvailableDeployHexes(pendingPurchaseUnitId)
                 : Collections.emptyList();
 
+        List<int[]> coreDeploySpots = (engine.isDeploymentPhase && pendingDeployCoreUnit != null)
+                ? engine.getValidCoreDeploymentHexes(pendingDeployCoreUnit)
+                : Collections.emptyList();
+
         // Pass 1: Draw TACMAP.SHP terrain tiles, fog of war, hex grid, and highlights
         for (int c = minCol; c <= maxCol; c++) {
             float x = c * COL_STEP;
@@ -568,6 +594,28 @@ public class PgMapView extends View {
                             canvas.drawPath(hexPath, hexStrokePaint);
                             break;
                         }
+                    }
+                }
+
+                // Campaign core deployment highlight
+                if (engine.isDeploymentPhase) {
+                    if (pendingDeployCoreUnit != null) {
+                        for (int[] ds : coreDeploySpots) {
+                            if (ds[0] == c && ds[1] == r) {
+                                highlightFillPaint.setColor(0x5500E5FF);
+                                canvas.drawPath(hexPath, highlightFillPaint);
+                                hexStrokePaint.setColor(0xFF00E5FF);
+                                hexStrokePaint.setStrokeWidth(2.4f);
+                                canvas.drawPath(hexPath, hexStrokePaint);
+                                break;
+                            }
+                        }
+                    } else if (cell.isDeployHex) {
+                        highlightFillPaint.setColor(0x30FFD54F);
+                        canvas.drawPath(hexPath, highlightFillPaint);
+                        hexStrokePaint.setColor(0xCCFFD54F);
+                        hexStrokePaint.setStrokeWidth(1.8f);
+                        canvas.drawPath(hexPath, hexStrokePaint);
                     }
                 }
 

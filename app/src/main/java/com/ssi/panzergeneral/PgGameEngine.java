@@ -101,6 +101,9 @@ public class PgGameEngine {
         public List<PgDatabase.ActiveUnit> units = new ArrayList<>();
         @Builder.Default
         public List<PgDatabase.ActiveUnit> coreRoster = new ArrayList<>();
+        @Builder.Default
+        public List<PgDatabase.ActiveUnit> unplacedCoreUnits = new ArrayList<>();
+        public boolean isDeploymentPhase;
         public int[][] hexOwners;
         public boolean[][] fogVisible;
         public String saveTimestamp;
@@ -118,6 +121,10 @@ public class PgGameEngine {
     public int groundCondition = 0; // 0=Dry, 1=Mud, 2=Snow
     public int axisPrestige = 400;
     public int alliedPrestige = 400;
+
+    // Campaign Core Deployment Phase
+    public boolean isDeploymentPhase = false;
+    public final List<PgDatabase.ActiveUnit> unplacedCoreUnits = new ArrayList<>();
 
     // Original Panzer General Preferences / Game Rules
     public boolean supplyEnabled = true;     // When OFF, units never run out of Fuel or Ammo
@@ -198,7 +205,18 @@ public class PgGameEngine {
         this.alliedPrestige = scenario.meta.alliedPrestige;
 
         this.units.clear();
+        this.unplacedCoreUnits.clear();
+
+        // Remove any destroyed core units from previous battle
+        if (carryOverCore) {
+            coreUnits.removeIf(u -> u.strength <= 0);
+        }
+
         for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
+            if (carryOverCore && u.isAxis && u.isCore) {
+                // In campaign continuation, placeholder core units from scenario file are replaced by player's carried-over core army!
+                continue;
+            }
             this.units.add(u);
             if (u.instanceId >= nextInstanceId) nextInstanceId = u.instanceId + 1;
             if (isCampaignMode && u.isAxis && u.isCore && coreUnits.size() < 40 && !carryOverCore) {
@@ -206,10 +224,9 @@ public class PgGameEngine {
             }
         }
 
-        // If carrying over core units from previous campaign battle, place them on deployment/friendly city hexes
+        // If carrying over core units from previous campaign battle, populate deployment reserve pool
         if (carryOverCore && !coreUnits.isEmpty()) {
-            List<int[]> deploySpots = getAvailableDeployHexes();
-            int spotIdx = 0;
+            this.isDeploymentPhase = true;
             for (PgDatabase.ActiveUnit core : coreUnits) {
                 PgDatabase.UnitDef def = db.equipment.get(core.unitDefId);
                 core.movePointsUsed = 0;
@@ -222,14 +239,14 @@ public class PgGameEngine {
                 core.entrenchment = 0;
                 core.fuel = def.maxFuel > 0 ? def.maxFuel : 99;
                 core.ammo = def.maxAmmo > 0 ? def.maxAmmo : 99;
+                // Free partial replenishment between battles (+3 strength if damaged, up to 10)
                 if (core.strength < 10) core.strength = Math.min(10, core.strength + 3);
-                if (spotIdx < deploySpots.size()) {
-                    int[] pos = deploySpots.get(spotIdx++);
-                    core.col = pos[0];
-                    core.row = pos[1];
-                    this.units.add(core);
-                }
+                core.col = -1;
+                core.row = -1;
+                this.unplacedCoreUnits.add(core);
             }
+        } else {
+            this.isDeploymentPhase = false;
         }
 
         visibleHexes = new boolean[scenario.cols][scenario.rows];
@@ -365,6 +382,104 @@ public class PgGameEngine {
         return false;
     }
 
+    // =========================================================================
+    // CAMPAIGN CORE DEPLOYMENT PHASE METHODS
+    // =========================================================================
+    public List<int[]> getValidCoreDeploymentHexes(PgDatabase.ActiveUnit u) {
+        List<int[]> res = new ArrayList<>();
+        if (scenario == null || u == null) return res;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        boolean isAir = def != null && def.isAir();
+        boolean[][] added = new boolean[scenario.cols][scenario.rows];
+
+        // 1. Scenario designated deployment hexes
+        for (int[] d : scenario.deployHexes) {
+            int dc = d[0], dr = d[1];
+            if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
+                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir) && !hasEnemyAdjacentOrOnHex(dc, dr, true)) {
+                    added[dc][dr] = true;
+                    res.add(new int[]{dc, dr});
+                }
+            }
+        }
+
+        // 2. Controlled cities (for ground) or controlled airfields (for air)
+        int targetBaseTerrain = isAir ? 6 : 8;
+        for (int c = 0; c < scenario.cols; c++) {
+            for (int r = 0; r < scenario.rows; r++) {
+                PgDatabase.HexCell cell = scenario.grid[c][r];
+                if (cell.terrainType == targetBaseTerrain && db.isAxisNation(cell.ownerNation, scenario)) {
+                    if (hasEnemyAdjacentOrOnHex(c, r, true)) continue;
+                    if (!added[c][r] && canDeployAtHex(c, r, isAir)) {
+                        added[c][r] = true;
+                        res.add(new int[]{c, r});
+                    }
+                    for (int[] nb : getNeighbors(c, r)) {
+                        int nc = nb[0], nr = nb[1];
+                        if (nc >= 0 && nc < scenario.cols && nr >= 0 && nr < scenario.rows) {
+                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir) && !hasEnemyAdjacentOrOnHex(nc, nr, true)) {
+                                added[nc][nr] = true;
+                                res.add(new int[]{nc, nr});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return res;
+    }
+
+    public boolean deployCoreUnit(PgDatabase.ActiveUnit u, int col, int row) {
+        if (!isDeploymentPhase || u == null) return false;
+        List<int[]> validSpots = getValidCoreDeploymentHexes(u);
+        boolean valid = false;
+        for (int[] s : validSpots) {
+            if (s[0] == col && s[1] == row) {
+                valid = true;
+                break;
+            }
+        }
+        if (!valid) return false;
+
+        u.col = col;
+        u.row = row;
+        u.movePointsUsed = 0;
+        u.moved = false;
+        u.attacked = false;
+        if (!units.contains(u)) {
+            units.add(u);
+        }
+        unplacedCoreUnits.remove(u);
+        recalculateFogOfWar();
+        return true;
+    }
+
+    public boolean undeployCoreUnit(PgDatabase.ActiveUnit u) {
+        if (!isDeploymentPhase || u == null || !u.isCore) return false;
+        if (units.remove(u)) {
+            u.col = -1;
+            u.row = -1;
+            if (!unplacedCoreUnits.contains(u)) {
+                unplacedCoreUnits.add(u);
+            }
+            recalculateFogOfWar();
+            return true;
+        }
+        return false;
+    }
+
+    public void startBattleAfterDeployment() {
+        this.isDeploymentPhase = false;
+        for (PgDatabase.ActiveUnit u : units) {
+            if (u.isAxis) {
+                u.moved = false;
+                u.attacked = false;
+                u.movePointsUsed = 0;
+            }
+        }
+        recalculateFogOfWar();
+    }
+
     public List<int[]> getAvailableDeployHexes() {
         return getAvailableDeployHexes(0);
     }
@@ -373,7 +488,36 @@ public class PgGameEngine {
         List<int[]> res = new ArrayList<>();
         if (scenario == null) return res;
 
-        // Initial scenario setup (campaign carry-over before battle begins)
+        // If in deployment phase, allow deploying purchased units on scenario deployment hexes as well
+        if (isDeploymentPhase) {
+            PgDatabase.UnitDef def = (unitDefId > 0 && unitDefId < db.equipment.size()) ? db.equipment.get(unitDefId) : null;
+            boolean isAir = def != null && def.isAir();
+            boolean[][] added = new boolean[scenario.cols][scenario.rows];
+            for (int[] d : scenario.deployHexes) {
+                int dc = d[0], dr = d[1];
+                if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir)) {
+                        added[dc][dr] = true;
+                        res.add(new int[]{dc, dr});
+                    }
+                }
+            }
+            int targetBaseTerrain = isAir ? 6 : 8;
+            for (int c = 0; c < scenario.cols; c++) {
+                for (int r = 0; r < scenario.rows; r++) {
+                    PgDatabase.HexCell cell = scenario.grid[c][r];
+                    if (cell.terrainType == targetBaseTerrain && db.isAxisNation(cell.ownerNation, scenario)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, isAir)) {
+                            added[c][r] = true;
+                            res.add(new int[]{c, r});
+                        }
+                    }
+                }
+            }
+            return res;
+        }
+
+        // Initial scenario setup
         if (unitDefId == 0) {
             boolean[][] added = new boolean[scenario.cols][scenario.rows];
             for (int[] d : scenario.deployHexes) {
@@ -1756,7 +1900,18 @@ public class PgGameEngine {
     }
 
     public boolean canReinforceUnit(PgDatabase.ActiveUnit u, boolean elite) {
-        if (u == null || !u.isAxis || !isPlayerTurn || u.moved || u.movePointsUsed > 0 || u.attacked || u.strength <= 0) {
+        if (u == null || !u.isAxis || !isPlayerTurn || u.strength <= 0) {
+            return false;
+        }
+        if (!isDeploymentPhase && (u.moved || u.movePointsUsed > 0 || u.attacked)) {
+            return false;
+        }
+        if (u.col < 0 || u.row < 0) {
+            if (isDeploymentPhase) {
+                if (axisPrestige < 8) return false;
+                if (!elite) return u.strength < 10;
+                return u.strength < u.getMaxOverstrength();
+            }
             return false;
         }
         if (!elite) {
@@ -1771,7 +1926,7 @@ public class PgGameEngine {
     public boolean reinforceUnit(PgDatabase.ActiveUnit u, boolean elite) {
         if (!canReinforceUnit(u, elite)) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-        boolean inZoc = isInEnemyZoc(u.col, u.row, u);
+        boolean inZoc = (u.col >= 0 && u.row >= 0) && isInEnemyZoc(u.col, u.row, u);
         int maxTarget = elite ? (inZoc ? 10 : u.getMaxOverstrength()) : 10;
         int needed = maxTarget - u.strength;
         if (inZoc) {
@@ -1794,20 +1949,28 @@ public class PgGameEngine {
             u.ammo = def.maxAmmo > 0 ? def.maxAmmo : 99;
             u.fuel = def.maxFuel > 0 ? def.maxFuel : 99;
         }
-        u.moved = true;
-        u.attacked = true;
+        if (!isDeploymentPhase) {
+            u.moved = true;
+            u.attacked = true;
+        }
         lastUndoState = null;
         return true;
     }
 
     // Panzer General Manual: Upgrade Unit in friendly city/port/airfield with no adjacent enemies
     public boolean canUpgradeUnit(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !isPlayerTurn || u.moved || u.movePointsUsed > 0 || u.attacked || u.strength <= 0) {
+        if (u == null || !u.isAxis || !isPlayerTurn || u.strength <= 0) {
+            return false;
+        }
+        if (!isDeploymentPhase && (u.moved || u.movePointsUsed > 0 || u.attacked)) {
             return false;
         }
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def.isFortification()) return false;
         if (u.inAirTransport || u.inSeaTransport) return false;
+        if (u.col < 0 || u.row < 0) {
+            return isDeploymentPhase && axisPrestige >= 20;
+        }
         if (isInEnemyZoc(u.col, u.row, u)) return false;
         PgDatabase.HexCell cell = scenario.grid[u.col][u.row];
         if (def.isAir()) {
@@ -1833,10 +1996,14 @@ public class PgGameEngine {
         u.strength = Math.min(10, u.strength);
         u.fuel = newDef.maxFuel > 0 ? newDef.maxFuel : 99;
         u.ammo = newDef.maxAmmo > 0 ? newDef.maxAmmo : 99;
-        u.moved = true;
-        u.attacked = true;
+        if (!isDeploymentPhase) {
+            u.moved = true;
+            u.attacked = true;
+        }
         lastUndoState = null;
-        recalculateFogOfWar();
+        if (u.col >= 0 && u.row >= 0) {
+            recalculateFogOfWar();
+        }
         return true;
     }
 
@@ -2600,6 +2767,8 @@ public class PgGameEngine {
                 .prestigeModifier(prestigeModifier)
                 .units(new ArrayList<>(units))
                 .coreRoster(new ArrayList<>(coreUnits))
+                .unplacedCoreUnits(new ArrayList<>(unplacedCoreUnits))
+                .isDeploymentPhase(isDeploymentPhase)
                 .hexOwners(hexOwners)
                 .scenarioTitle(scenario.meta.fullTitle)
                 .saveTimestamp(saveTimestamp)
@@ -2639,6 +2808,11 @@ public class PgGameEngine {
             this.units.addAll(st.units);
             this.coreUnits.clear();
             this.coreUnits.addAll(st.coreRoster);
+            this.unplacedCoreUnits.clear();
+            if (st.unplacedCoreUnits != null) {
+                this.unplacedCoreUnits.addAll(st.unplacedCoreUnits);
+            }
+            this.isDeploymentPhase = st.isDeploymentPhase;
             for (int c = 0; c < scenario.cols && c < st.hexOwners.length; c++) {
                 for (int r = 0; r < scenario.rows && r < st.hexOwners[c].length; r++) {
                     scenario.grid[c][r].ownerNation = st.hexOwners[c][r];
