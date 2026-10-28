@@ -170,8 +170,8 @@ public class PgGameEngine {
         this.campaignIndex = campIdx;
         this.coreUnits.clear();
         int startScen = CAMPAIGN_START_SCENARIOS[campIdx % CAMPAIGN_START_SCENARIOS.length];
+        loadScenario(startScen, false);
         this.axisPrestige = (CAMPAIGN_START_PRESTIGE[campIdx % CAMPAIGN_START_PRESTIGE.length] * prestigeModifier) / 100;
-        loadScenario(startScen, true);
     }
 
     public void startSingleScenario(int scenNum) throws IOException {
@@ -207,25 +207,27 @@ public class PgGameEngine {
         this.units.clear();
         this.unplacedCoreUnits.clear();
 
+        boolean hasExistingCoreArmy = carryOverCore && !coreUnits.isEmpty();
+
         // Remove any destroyed core units from previous battle
-        if (carryOverCore) {
+        if (hasExistingCoreArmy) {
             coreUnits.removeIf(u -> u.strength <= 0);
         }
 
         for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
-            if (carryOverCore && u.isAxis && u.isCore) {
+            if (hasExistingCoreArmy && u.isAxis && u.isCore) {
                 // In campaign continuation, placeholder core units from scenario file are replaced by player's carried-over core army!
                 continue;
             }
             this.units.add(u);
             if (u.instanceId >= nextInstanceId) nextInstanceId = u.instanceId + 1;
-            if (isCampaignMode && u.isAxis && u.isCore && coreUnits.size() < 40 && !carryOverCore) {
+            if (isCampaignMode && u.isAxis && u.isCore && coreUnits.size() < 40 && !hasExistingCoreArmy) {
                 coreUnits.add(u);
             }
         }
 
         // If carrying over core units from previous campaign battle, populate deployment reserve pool
-        if (carryOverCore && !coreUnits.isEmpty()) {
+        if (hasExistingCoreArmy) {
             this.isDeploymentPhase = true;
             for (PgDatabase.ActiveUnit core : coreUnits) {
                 PgDatabase.UnitDef def = db.equipment.get(core.unitDefId);

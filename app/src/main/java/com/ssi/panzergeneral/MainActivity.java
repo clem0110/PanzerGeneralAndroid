@@ -566,14 +566,20 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         mapView.clearSelection();
 
         // Center camera on first Axis unit
+        boolean centered = false;
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u.isAxis) {
+            if (u.isAxis && u.col >= 0 && u.row >= 0) {
                 mapView.post(() -> {
                     mapView.centerOnHex(u.col, u.row);
                     mapView.selectUnit(u);
                 });
+                centered = true;
                 break;
             }
+        }
+        if (!centered && engine.scenario != null && !engine.scenario.deployHexes.isEmpty()) {
+            int[] dh = engine.scenario.deployHexes.get(0);
+            mapView.post(() -> mapView.centerOnHex(dh[0], dh[1]));
         }
         sounds.startMusic(engine.currentScenarioNumber % 6);
         refreshHud();
