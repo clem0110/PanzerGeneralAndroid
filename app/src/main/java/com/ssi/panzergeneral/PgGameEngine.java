@@ -222,6 +222,7 @@ public class PgGameEngine {
             this.units.add(u);
             if (u.instanceId >= nextInstanceId) nextInstanceId = u.instanceId + 1;
             if (isCampaignMode && u.isAxis && u.isCore && coreUnits.size() < 40 && !hasExistingCoreArmy) {
+                if (u.strength < 10) u.strength = 10;
                 coreUnits.add(u);
             }
         }
@@ -241,8 +242,8 @@ public class PgGameEngine {
                 core.entrenchment = 0;
                 core.fuel = def.maxFuel > 0 ? def.maxFuel : 99;
                 core.ammo = def.maxAmmo > 0 ? def.maxAmmo : 99;
-                // Free partial replenishment between battles (+3 strength if damaged, up to 10)
-                if (core.strength < 10) core.strength = Math.min(10, core.strength + 3);
+                // Free replenishment between battles: any core unit below 10 strength moves to 10; >= 10 stays unchanged
+                if (core.strength < 10) core.strength = 10;
                 core.col = -1;
                 core.row = -1;
                 this.unplacedCoreUnits.add(core);
