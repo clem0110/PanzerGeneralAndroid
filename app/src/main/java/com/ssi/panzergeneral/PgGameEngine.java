@@ -215,15 +215,26 @@ public class PgGameEngine {
         }
 
         for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
+            PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
             if (hasExistingCoreArmy && u.isAxis && u.isCore) {
-                // In campaign continuation, placeholder core units from scenario file are replaced by player's carried-over core army!
-                continue;
+                if (def != null && def.isNaval()) {
+                    // Naval units cannot be bought or carried over in campaign; supply them as scenario auxiliaries!
+                    u.isCore = false;
+                } else {
+                    // In campaign continuation, placeholder core units from scenario file are replaced by player's carried-over core army!
+                    continue;
+                }
             }
             this.units.add(u);
             if (u.instanceId >= nextInstanceId) nextInstanceId = u.instanceId + 1;
             if (isCampaignMode && u.isAxis && u.isCore && coreUnits.size() < 40 && !hasExistingCoreArmy) {
-                if (u.strength < 10) u.strength = 10;
-                coreUnits.add(u);
+                if (def != null && def.isNaval()) {
+                    // Naval units are scenario-specific auxiliaries and do not persist in ground core army
+                    u.isCore = false;
+                } else {
+                    if (u.strength < 10) u.strength = 10;
+                    coreUnits.add(u);
+                }
             }
         }
 

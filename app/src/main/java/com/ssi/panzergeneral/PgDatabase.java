@@ -648,7 +648,7 @@ public class PgDatabase {
                     .transportDefId((trpId > 0 && trpId < equipment.size()) ? trpId : 0)
                     .nation(nat)
                     .isAxis(isAxis)
-                    .isCore(isAxis && (auxFlag == 0))
+                    .isCore(isAxis && (auxFlag == 0) && !def.isNaval())
                     .col(c)
                     .row(r)
                     .strength((str > 0 && str <= 15) ? str : 10)
