@@ -16,7 +16,14 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.*;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.net.Uri;
+import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class MainActivity extends Activity implements PgMapView.MapInteractionListener {
@@ -51,6 +58,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     private Button btnNextUnit;
     private Button btnEndTurn;
     private volatile boolean isAiTurnRunning = false;
+    private static final int REQUEST_SAVE_TO_DRIVE = 1001;
+    private static final int REQUEST_LOAD_FROM_DRIVE = 1002;
+    private static final int REQUEST_IMPORT_TO_SLOT = 1003;
+    private int pendingExportSlot = 0;
+    private int pendingImportSlot = 0;
 
     private void setHudControlsEnabled(boolean enabled) {
         if (btnEndTurn != null) btnEndTurn.setEnabled(enabled);
@@ -200,7 +212,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         });
         btnGrid.addView(btnOptions, createMenuBtnParams());
 
-        Button btnLoad = createStyledButton("LOAD SAVED GAME", 0xFF373B3E, 0xFFFFFFFF);
+        Button btnLoad = createStyledButton("LOAD SAVED GAME (LOCAL / GOOGLE DRIVE)", 0xFF373B3E, 0xFFFFFFFF);
         btnLoad.setOnClickListener(v -> {
             sounds.playClick();
             showSaveLoadDialog(false);
@@ -2764,8 +2776,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             "Panzer General Instruction Manual & Tactical Rules",
             "Unit Dossier / Upgrade / Disband Selected Unit",
             "Game Options & Preferences (Supply, Weather, Fog of War...)",
-            "Save Game",
-            "Load Saved Game",
+            "Save Game (Local Slot / Google Drive)",
+            "Load Saved Game (Local Slot / Google Drive)",
             "Supply (Fuel & Ammo): " + (engine.supplyEnabled ? "ON (Standard Rules)" : "OFF (Unlimited Fuel & Ammo)"),
             "Weather Effects: " + (engine.weatherEnabled ? "ON (Dynamic Weather)" : "OFF (Always Clear/Dry)"),
             "Fog of War: " + (engine.fogOfWarEnabled ? "ON" : "OFF"),
@@ -2941,35 +2953,216 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void showSaveLoadDialog(boolean isSave) {
-        String[] slots = new String[5];
+        String[] options = new String[7];
         for (int i = 0; i < 5; i++) {
-            slots[i] = engine.getSaveSummary(this, i + 1);
+            options[i] = engine.getSaveSummary(this, i + 1);
         }
+        if (isSave) {
+            options[5] = "\u2601 Save Active Battle to Google Drive...";
+            options[6] = "\u2601 Export a Local Save Slot to Google Drive...";
+        } else {
+            options[5] = "\u2601 Load Game from Google Drive / Cloud File...";
+            options[6] = "\u2601 Import Google Drive File into a Local Slot...";
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle(isSave ? "Save Tactical Game" : "Load Tactical Game")
-                .setItems(slots, (d, which) -> {
-                    int slot = which + 1;
-                    if (isSave) {
-                        try {
-                            engine.saveGame(this, slot);
-                            Toast.makeText(this, "Saved to Slot " + slot, Toast.LENGTH_SHORT).show();
-                        } catch (IOException e) {
-                            Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                        }
-                    } else {
-                        if (engine.loadGame(this, slot)) {
-                            if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
-                            mapView.clearSelection();
-                            refreshHud();
-                            mapView.invalidate();
-                            Toast.makeText(this, "Loaded Slot " + slot, Toast.LENGTH_SHORT).show();
+                .setItems(options, (d, which) -> {
+                    if (which < 5) {
+                        int slot = which + 1;
+                        if (isSave) {
+                            try {
+                                engine.saveGame(this, slot);
+                                sounds.playSelect();
+                                Toast.makeText(this, "Saved to Slot " + slot, Toast.LENGTH_SHORT).show();
+                            } catch (IOException e) {
+                                Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            }
                         } else {
-                            Toast.makeText(this, "Slot " + slot + " is empty.", Toast.LENGTH_SHORT).show();
+                            if (engine.loadGame(this, slot)) {
+                                if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
+                                mapView.clearSelection();
+                                refreshHud();
+                                mapView.invalidate();
+                                sounds.playSelect();
+                                Toast.makeText(this, "Loaded Slot " + slot, Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(this, "Slot " + slot + " is empty.", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    } else if (which == 5) {
+                        if (isSave) {
+                            if (engine.scenario == null) {
+                                Toast.makeText(this, "No active scenario in progress to save.", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            launchGoogleDriveSavePicker(0);
+                        } else {
+                            launchGoogleDriveLoadPicker(0);
+                        }
+                    } else if (which == 6) {
+                        if (isSave) {
+                            showExportSlotDialog();
+                        } else {
+                            showImportSlotDialog();
                         }
                     }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void launchGoogleDriveSavePicker(int slotToExport) {
+        pendingExportSlot = slotToExport;
+        String sName = (engine.scenario != null && engine.scenario.meta != null)
+                ? engine.scenario.meta.shortTitle.replaceAll("[^a-zA-Z0-9_-]", "")
+                : "Battle";
+        String ts = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(new Date());
+        String defaultFileName;
+        if (slotToExport > 0) {
+            defaultFileName = String.format(Locale.US, "PG_Slot%d_Export_%s.pgsave", slotToExport, ts);
+        } else {
+            defaultFileName = String.format(Locale.US, "PG_%s_Turn%d_%s.pgsave", sName, engine.turn, ts);
+        }
+
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_TITLE, defaultFileName);
+        try {
+            startActivityForResult(intent, REQUEST_SAVE_TO_DRIVE);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Google Drive / Document Manager not available on this device.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showExportSlotDialog() {
+        String[] slots = new String[5];
+        for (int i = 0; i < 5; i++) {
+            slots[i] = engine.getSaveSummary(this, i + 1);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Select Local Slot to Export to Google Drive")
+                .setItems(slots, (d, which) -> {
+                    int slot = which + 1;
+                    File f = new File(getFilesDir(), "pg_save_" + slot + ".dat");
+                    if (!f.exists()) {
+                        Toast.makeText(this, "Slot " + slot + " has no saved game.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    launchGoogleDriveSavePicker(slot);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void launchGoogleDriveLoadPicker(int targetSlotToImport) {
+        pendingImportSlot = targetSlotToImport;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/octet-stream", "application/x-binary", "*/*"});
+        try {
+            startActivityForResult(intent, targetSlotToImport > 0 ? REQUEST_IMPORT_TO_SLOT : REQUEST_LOAD_FROM_DRIVE);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Google Drive / Document Manager not available on this device.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showImportSlotDialog() {
+        String[] slots = new String[5];
+        for (int i = 0; i < 5; i++) {
+            File f = new File(getFilesDir(), "pg_save_" + (i + 1) + ".dat");
+            slots[i] = "Slot " + (i + 1) + ": " + (f.exists() ? "(Will Overwrite Existing Save)" : "(Empty)");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Select Target Slot for Google Drive File")
+                .setItems(slots, (d, which) -> {
+                    int slot = which + 1;
+                    launchGoogleDriveLoadPicker(slot);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            pendingExportSlot = 0;
+            pendingImportSlot = 0;
+            return;
+        }
+        Uri uri = data.getData();
+        if (requestCode == REQUEST_SAVE_TO_DRIVE) {
+            try (OutputStream os = getContentResolver().openOutputStream(uri)) {
+                if (os == null) throw new IOException("Unable to open output stream.");
+                if (pendingExportSlot > 0) {
+                    if (engine.exportSlotToStream(this, pendingExportSlot, os)) {
+                        sounds.playSelect();
+                        Toast.makeText(this, "\u2605 Slot " + pendingExportSlot + " successfully saved to Google Drive! \u2605", Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this, "Failed to export Slot " + pendingExportSlot, Toast.LENGTH_LONG).show();
+                    }
+                } else {
+                    engine.saveGameToStream(os);
+                    sounds.playSelect();
+                    Toast.makeText(this, "\u2605 Battle successfully saved to Google Drive! \u2605", Toast.LENGTH_LONG).show();
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Failed saving to Google Drive: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            } finally {
+                pendingExportSlot = 0;
+            }
+        } else if (requestCode == REQUEST_LOAD_FROM_DRIVE) {
+            try (InputStream is = getContentResolver().openInputStream(uri)) {
+                if (is == null) throw new IOException("Unable to open input stream.");
+                if (engine.loadGameFromStream(is)) {
+                    if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
+                    mapView.clearSelection();
+                    refreshHud();
+                    mapView.invalidate();
+                    sounds.playSelect();
+                    String name = (engine.scenario != null && engine.scenario.meta != null) ? engine.scenario.meta.fullTitle : "";
+                    Toast.makeText(this, "\u2605 Loaded from Google Drive: " + name + " (Turn " + engine.turn + "/" + engine.maxTurns + ") \u2605", Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this, "Selected file is not a valid Panzer General save game.", Toast.LENGTH_LONG).show();
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Failed loading from Google Drive: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        } else if (requestCode == REQUEST_IMPORT_TO_SLOT) {
+            final int slot = pendingImportSlot;
+            pendingImportSlot = 0;
+            if (slot >= 1 && slot <= 5) {
+                try (InputStream is = getContentResolver().openInputStream(uri)) {
+                    if (is == null) throw new IOException("Unable to open input stream.");
+                    if (engine.importStreamToSlot(this, is, slot)) {
+                        sounds.playSelect();
+                        String summary = engine.getSaveSummary(this, slot);
+                        new AlertDialog.Builder(this)
+                                .setTitle("Google Drive Import Complete")
+                                .setMessage("Successfully imported save file into Slot " + slot + "!\n\n" + summary + "\n\nWould you like to load and play this game now?")
+                                .setPositiveButton("Load & Play Now", (d, w) -> {
+                                    if (engine.loadGame(this, slot)) {
+                                        if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
+                                        mapView.clearSelection();
+                                        refreshHud();
+                                        mapView.invalidate();
+                                        sounds.playSelect();
+                                        Toast.makeText(this, "Loaded Slot " + slot, Toast.LENGTH_SHORT).show();
+                                    }
+                                })
+                                .setNegativeButton("Keep in Slot", null)
+                                .show();
+                    } else {
+                        Toast.makeText(this, "Failed to import save file into Slot " + slot, Toast.LENGTH_LONG).show();
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed importing file: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            }
+        }
     }
 
     private void showEncyclopediaDialog() {

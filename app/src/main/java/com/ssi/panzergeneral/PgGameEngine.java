@@ -3311,7 +3311,8 @@ public class PgGameEngine {
         return w + " / " + g;
     }
 
-    public void saveGame(Context ctx, int slot) throws IOException {
+    public void saveGameToStream(OutputStream os) throws IOException {
+        if (scenario == null) throw new IOException("No active scenario to save.");
         int[][] hexOwners = new int[scenario.cols][scenario.rows];
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
@@ -3340,20 +3341,57 @@ public class PgGameEngine {
                 .unplacedCoreUnits(new ArrayList<>(unplacedCoreUnits))
                 .isDeploymentPhase(isDeploymentPhase)
                 .hexOwners(hexOwners)
-                .scenarioTitle(scenario.meta.fullTitle)
+                .scenarioTitle(scenario.meta != null ? scenario.meta.fullTitle : "Panzer General Battle")
                 .saveTimestamp(saveTimestamp)
                 .build();
 
+        ObjectOutputStream oos = new ObjectOutputStream(os);
+        oos.writeObject(st);
+        oos.flush();
+    }
+
+    public void saveGame(Context ctx, int slot) throws IOException {
         File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
-        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(f))) {
-            oos.writeObject(st);
+        try (FileOutputStream fos = new FileOutputStream(f)) {
+            saveGameToStream(fos);
         }
     }
 
-    public boolean loadGame(Context ctx, int slot) {
+    public boolean exportSlotToStream(Context ctx, int slot, OutputStream os) {
         File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
         if (!f.exists()) return false;
-        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(f))) {
+        try (FileInputStream fis = new FileInputStream(f)) {
+            byte[] buf = new byte[8192];
+            int read;
+            while ((read = fis.read(buf)) != -1) {
+                os.write(buf, 0, read);
+            }
+            os.flush();
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    public boolean importStreamToSlot(Context ctx, InputStream is, int slot) {
+        File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
+        try (FileOutputStream fos = new FileOutputStream(f)) {
+            byte[] buf = new byte[8192];
+            int read;
+            while ((read = is.read(buf)) != -1) {
+                fos.write(buf, 0, read);
+            }
+            fos.flush();
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    public boolean loadGameFromStream(InputStream is) {
+        try (ObjectInputStream ois = new ObjectInputStream(is)) {
             SaveState st = (SaveState) ois.readObject();
             this.isCampaignMode = st.isCampaign;
             this.campaignIndex = st.campaignEntryIndex;
@@ -3392,6 +3430,17 @@ public class PgGameEngine {
             this.visibleHexes = new boolean[scenario.cols][scenario.rows];
             recalculateFogOfWar();
             return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    public boolean loadGame(Context ctx, int slot) {
+        File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
+        if (!f.exists()) return false;
+        try (FileInputStream fis = new FileInputStream(f)) {
+            return loadGameFromStream(fis);
         } catch (Exception e) {
             return false;
         }
