@@ -855,7 +855,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     @Override
     public void onDeployHexTapped(int col, int row) {
         if (!engine.isDeploymentPhase) return;
-        showCoreDeploymentDialogForHex(col, row);
+        showCoreDeploymentDialog(col, row);
     }
 
     private void confirmStartBattle() {
@@ -893,9 +893,23 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     public void showCoreDeploymentDialog() {
-        if (engine.scenario == null) return;
+        showCoreDeploymentDialog(-1, -1);
+    }
+
+    public void showCoreDeploymentDialogForHex(int targetCol, int targetRow) {
+        showCoreDeploymentDialog(targetCol, targetRow);
+    }
+
+    public void showCoreDeploymentDialog(final int targetCol, final int targetRow) {
+        if (engine.scenario == null || !engine.isDeploymentPhase) return;
         final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        final boolean hasTargetHex = (targetCol >= 0 && targetCol < engine.scenario.cols
+                && targetRow >= 0 && targetRow < engine.scenario.rows);
+        final PgDatabase.HexCell targetCell = hasTargetHex ? engine.scenario.grid[targetCol][targetRow] : null;
+        final PgDatabase.ActiveUnit gndOcc = hasTargetHex ? engine.getUnitAt(targetCol, targetRow, false) : null;
+        final PgDatabase.ActiveUnit airOcc = hasTargetHex ? engine.getUnitAt(targetCol, targetRow, true) : null;
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -932,9 +946,18 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         titleStack.addView(tvHeaderTitle);
 
         TextView tvSubHeader = new TextView(this);
-        tvSubHeader.setText(String.format(Locale.ROOT,
-                "Reserve Core Units: %d remaining   •   Deploy onto marked deployment hexes",
-                engine.unplacedCoreUnits.size()));
+        if (hasTargetHex) {
+            String hexDesc = targetCell != null && targetCell.name != null && !targetCell.name.isEmpty()
+                    ? targetCell.name + " (" + targetCell.getTerrainName() + ")"
+                    : (targetCell != null ? targetCell.getTerrainName() : "");
+            tvSubHeader.setText(String.format(Locale.ROOT,
+                    "Target Hex: (%d, %d) %s   •   Reserve Units: %d remaining",
+                    targetCol, targetRow, hexDesc, engine.unplacedCoreUnits.size()));
+        } else {
+            tvSubHeader.setText(String.format(Locale.ROOT,
+                    "Reserve Core Units: %d remaining   •   Deploy onto marked deployment hexes",
+                    engine.unplacedCoreUnits.size()));
+        }
         tvSubHeader.setTextColor(0xFFB0BEC5);
         tvSubHeader.setTextSize(11.5f);
         titleStack.addView(tvSubHeader);
@@ -973,6 +996,50 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         });
         headerRow.addView(btnClose, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 60));
         root.addView(headerRow);
+
+        // If target hex currently has a deployed core unit, show return-to-reserves bar
+        PgDatabase.ActiveUnit coreOnTarget = null;
+        if (gndOcc != null && gndOcc.isCore) coreOnTarget = gndOcc;
+        else if (airOcc != null && airOcc.isCore) coreOnTarget = airOcc;
+
+        if (hasTargetHex && coreOnTarget != null) {
+            LinearLayout undepBar = new LinearLayout(this);
+            undepBar.setOrientation(LinearLayout.HORIZONTAL);
+            undepBar.setGravity(Gravity.CENTER_VERTICAL);
+            undepBar.setPadding(16, 8, 16, 8);
+            GradientDrawable undepBg = new GradientDrawable();
+            undepBg.setColor(0xFF2C2219);
+            undepBg.setCornerRadius(6f);
+            undepBg.setStroke(1, 0xFFC5A059);
+            undepBar.setBackground(undepBg);
+
+            LinearLayout.LayoutParams ubLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            ubLp.setMargins(0, 8, 0, 8);
+
+            TextView tvUndep = new TextView(this);
+            PgDatabase.UnitDef cDef = db.equipment.get(coreOnTarget.unitDefId);
+            String cName = cDef != null ? cDef.name : "Unit";
+            tvUndep.setText("Target hex currently occupied by: " + cName);
+            tvUndep.setTextColor(0xFFFFCC80);
+            tvUndep.setTextSize(12.5f);
+            undepBar.addView(tvUndep, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            Button btnUndep = createCompactButton("RETURN " + cName.toUpperCase(Locale.ROOT) + " TO RESERVES", 0xFF8D6E63);
+            final PgDatabase.ActiveUnit toReturn = coreOnTarget;
+            btnUndep.setOnClickListener(v -> {
+                sounds.playSelect();
+                if (engine.undeployCoreUnit(toReturn)) {
+                    mapView.selectedUnit = null;
+                    refreshHud();
+                    mapView.invalidate();
+                    dialog.dismiss();
+                    showCoreDeploymentDialog(targetCol, targetRow);
+                }
+            });
+            undepBar.addView(btnUndep);
+            root.addView(undepBar, ubLp);
+        }
 
         // Content
         if (engine.unplacedCoreUnits.isEmpty()) {
@@ -1025,6 +1092,17 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     listLayout.addView(tvHeader);
                 }
 
+                boolean canDeployOnTargetHex = false;
+                if (hasTargetHex) {
+                    List<int[]> validHexes = engine.getValidCoreDeploymentHexes(u);
+                    for (int[] h : validHexes) {
+                        if (h[0] == targetCol && h[1] == targetRow) {
+                            canDeployOnTargetHex = true;
+                            break;
+                        }
+                    }
+                }
+
                 LinearLayout card = new LinearLayout(this);
                 card.setOrientation(LinearLayout.HORIZONTAL);
                 card.setGravity(Gravity.CENTER_VERTICAL);
@@ -1032,7 +1110,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 GradientDrawable cardBg = new GradientDrawable();
                 cardBg.setColor(0xFF1E2520);
                 cardBg.setCornerRadius(8f);
-                cardBg.setStroke(1, 0xFF3E4F42);
+                if (hasTargetHex && canDeployOnTargetHex) {
+                    cardBg.setStroke(2, 0xFF4CAF50);
+                } else {
+                    cardBg.setStroke(1, 0xFF3E4F42);
+                }
                 card.setBackground(cardBg);
 
                 LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
@@ -1093,7 +1175,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                         engine.reinforceUnit(u, false);
                         refreshHud();
                         dialog.dismiss();
-                        showCoreDeploymentDialog();
+                        showCoreDeploymentDialog(targetCol, targetRow);
                     });
                     LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 56);
                     blp.setMargins(4, 0, 4, 0);
@@ -1107,7 +1189,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                         engine.reinforceUnit(u, true);
                         refreshHud();
                         dialog.dismiss();
-                        showCoreDeploymentDialog();
+                        showCoreDeploymentDialog(targetCol, targetRow);
                     });
                     LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 56);
                     blp.setMargins(4, 0, 4, 0);
@@ -1126,16 +1208,37 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     btnStack.addView(btnUpg, blp);
                 }
 
-                Button btnDeploy = createCompactButton("DEPLOY ON MAP", 0xFF00695C);
-                btnDeploy.setOnClickListener(v -> {
-                    sounds.playClick();
-                    dialog.dismiss();
-                    mapView.pendingDeployCoreUnit = u;
-                    mapView.invalidate();
-                    Toast.makeText(MainActivity.this,
-                            "Tap any highlighted deployment hex (cyan) to place " + def.name,
-                            Toast.LENGTH_LONG).show();
-                });
+                Button btnDeploy;
+                if (hasTargetHex && canDeployOnTargetHex) {
+                    btnDeploy = createCompactButton("DEPLOY HERE", 0xFF2E7D32);
+                    btnDeploy.setOnClickListener(v -> {
+                        sounds.playClick();
+                        dialog.dismiss();
+                        onCoreUnitDeployRequested(u, targetCol, targetRow);
+                    });
+                } else if (hasTargetHex) {
+                    btnDeploy = createCompactButton("DEPLOY ELSEWHERE", 0xFF455A64);
+                    btnDeploy.setOnClickListener(v -> {
+                        sounds.playClick();
+                        dialog.dismiss();
+                        mapView.pendingDeployCoreUnit = u;
+                        mapView.invalidate();
+                        Toast.makeText(MainActivity.this,
+                                "Tap any highlighted deployment hex (cyan) to place " + def.name,
+                                Toast.LENGTH_LONG).show();
+                    });
+                } else {
+                    btnDeploy = createCompactButton("DEPLOY ON MAP", 0xFF00695C);
+                    btnDeploy.setOnClickListener(v -> {
+                        sounds.playClick();
+                        dialog.dismiss();
+                        mapView.pendingDeployCoreUnit = u;
+                        mapView.invalidate();
+                        Toast.makeText(MainActivity.this,
+                                "Tap any highlighted deployment hex (cyan) to place " + def.name,
+                                Toast.LENGTH_LONG).show();
+                    });
+                }
                 LinearLayout.LayoutParams depLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 56);
                 depLp.setMargins(6, 0, 0, 0);
                 btnStack.addView(btnDeploy, depLp);
@@ -1151,78 +1254,6 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         dialog.setContentView(root);
         dialog.show();
-    }
-
-    public void showCoreDeploymentDialogForHex(int targetCol, int targetRow) {
-        if (engine.scenario == null || !engine.isDeploymentPhase) return;
-        if (targetCol < 0 || targetCol >= engine.scenario.cols || targetRow < 0 || targetRow >= engine.scenario.rows) return;
-        PgDatabase.HexCell cell = engine.scenario.grid[targetCol][targetRow];
-        PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(targetCol, targetRow, false);
-        PgDatabase.ActiveUnit airOcc = engine.getUnitAt(targetCol, targetRow, true);
-
-        List<PgDatabase.ActiveUnit> eligible = new ArrayList<>();
-        for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
-            List<int[]> validHexes = engine.getValidCoreDeploymentHexes(u);
-            for (int[] h : validHexes) {
-                if (h[0] == targetCol && h[1] == targetRow) {
-                    eligible.add(u);
-                    break;
-                }
-            }
-        }
-        engine.sortUnitsByTypeAndName(eligible);
-
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        String title = (gndOcc != null && airOcc == null)
-                ? String.format(Locale.ROOT, "Deploy Plane at (%d, %d) [With %s]", targetCol, targetRow, db.equipment.get(gndOcc.unitDefId).name)
-                : String.format(Locale.ROOT, "Deploy Core Unit at (%d, %d) - %s [%s]", targetCol, targetRow, cell.name, cell.getTerrainName());
-        b.setTitle(title);
-
-        if (eligible.isEmpty()) {
-            if (engine.unplacedCoreUnits.isEmpty()) {
-                b.setMessage("No reserve core units remaining. All core units have been placed on the battlefield.");
-            } else if (gndOcc != null) {
-                b.setMessage("Position is occupied on ground by " + db.equipment.get(gndOcc.unitDefId).name + ". No reserve air units available to deploy here.");
-            } else if (cell.terrainType == 6) {
-                b.setMessage("No reserve air units available to deploy onto this airfield.");
-            } else {
-                b.setMessage("No reserve ground units can deploy onto this position.");
-            }
-            b.setNegativeButton("Close", null);
-            b.setPositiveButton("View Reserves", (d, w) -> showCoreDeploymentDialog());
-            b.show();
-            return;
-        }
-
-        String[] items = new String[eligible.size()];
-        for (int i = 0; i < eligible.size(); i++) {
-            PgDatabase.ActiveUnit u = eligible.get(i);
-            PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-            String className = (def.unitClass >= 0 && def.unitClass < PgDatabase.CLASS_NAMES.length)
-                    ? PgDatabase.CLASS_NAMES[def.unitClass] : "Unit";
-            String stars = u.getStars() > 0 ? (" ★".repeat(u.getStars())) : "";
-            items[i] = String.format(Locale.ROOT, "%s [%s%s] • Str: %d/%d (Exp: %d) • Mov: %d",
-                    def.name, className, stars, u.strength, u.getMaxOverstrength(), u.experience, def.movement);
-        }
-
-        b.setItems(items, (d, which) -> {
-            PgDatabase.ActiveUnit selected = eligible.get(which);
-            onCoreUnitDeployRequested(selected, targetCol, targetRow);
-        });
-        b.setNegativeButton("Cancel", null);
-        b.setNeutralButton("View All Reserves", (d, w) -> showCoreDeploymentDialog());
-        if (gndOcc != null && gndOcc.isCore) {
-            b.setPositiveButton("Return " + db.equipment.get(gndOcc.unitDefId).name + " to Reserves", (d, w) -> {
-                if (engine.undeployCoreUnit(gndOcc)) {
-                    sounds.playSelect();
-                    mapView.selectedUnit = null;
-                    refreshHud();
-                    mapView.invalidate();
-                    Toast.makeText(this, "Returned " + db.equipment.get(gndOcc.unitDefId).name + " to Reserve Pool.", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }
-        b.show();
     }
 
     private void selectNextUnmovedUnit() {

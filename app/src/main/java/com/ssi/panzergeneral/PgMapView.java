@@ -369,6 +369,8 @@ public class PgMapView extends View {
         int[] hex = pixelToHex(worldX, worldY);
         if (hex == null) return;
         int col = hex[0], row = hex[1];
+        PgDatabase.HexCell cell = (engine.scenario != null && col >= 0 && col < engine.scenario.cols && row >= 0 && row < engine.scenario.rows)
+                ? engine.scenario.grid[col][row] : null;
 
         if (purchasePlacementMode) {
             if (listener != null) {
@@ -389,14 +391,18 @@ public class PgMapView extends View {
             PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(col, row, false);
             boolean canDeployHere = false;
             if ((airOcc == null || gndOcc == null) && !engine.unplacedCoreUnits.isEmpty()) {
-                for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
-                    for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
-                        if (h[0] == col && h[1] == row) {
-                            canDeployHere = true;
-                            break;
+                if (cell != null && cell.isDeployHex) {
+                    canDeployHere = true;
+                } else {
+                    for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
+                        for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
+                            if (h[0] == col && h[1] == row) {
+                                canDeployHere = true;
+                                break;
+                            }
                         }
+                        if (canDeployHere) break;
                     }
-                    if (canDeployHere) break;
                 }
             }
 
@@ -470,14 +476,18 @@ public class PgMapView extends View {
                 PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(col, row, false);
                 boolean canDeployHere = false;
                 if ((airOcc == null || gndOcc == null) && !engine.unplacedCoreUnits.isEmpty()) {
-                    for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
-                        for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
-                            if (h[0] == col && h[1] == row) {
-                                canDeployHere = true;
-                                break;
+                    if (cell != null && cell.isDeployHex) {
+                        canDeployHere = true;
+                    } else {
+                        for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
+                            for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
+                                if (h[0] == col && h[1] == row) {
+                                    canDeployHere = true;
+                                    break;
+                                }
                             }
+                            if (canDeployHere) break;
                         }
-                        if (canDeployHere) break;
                     }
                 }
                 if (canDeployHere) {
