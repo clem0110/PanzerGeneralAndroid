@@ -442,19 +442,7 @@ public class PgMapView extends View {
             PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(col, row, false);
             boolean canDeployHere = false;
             if ((airOcc == null || gndOcc == null) && !engine.unplacedCoreUnits.isEmpty()) {
-                if (cell != null && cell.isDeployHex) {
-                    canDeployHere = true;
-                } else {
-                    for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
-                        for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
-                            if (h[0] == col && h[1] == row) {
-                                canDeployHere = true;
-                                break;
-                            }
-                        }
-                        if (canDeployHere) break;
-                    }
-                }
+                canDeployHere = engine.isHexValidForCoreDeployment(col, row);
             }
 
             if (canDeployHere) {
@@ -517,19 +505,7 @@ public class PgMapView extends View {
                 PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(col, row, false);
                 boolean canDeployHere = false;
                 if ((airOcc == null || gndOcc == null) && !engine.unplacedCoreUnits.isEmpty()) {
-                    if (cell != null && cell.isDeployHex) {
-                        canDeployHere = true;
-                    } else {
-                        for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
-                            for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
-                                if (h[0] == col && h[1] == row) {
-                                    canDeployHere = true;
-                                    break;
-                                }
-                            }
-                            if (canDeployHere) break;
-                        }
-                    }
+                    canDeployHere = engine.isHexValidForCoreDeployment(col, row);
                 }
                 if (canDeployHere) {
                     if (listener != null) {
@@ -719,7 +695,7 @@ public class PgMapView extends View {
                                 break;
                             }
                         }
-                    } else if (cell.isDeployHex) {
+                    } else if (cell.isDeployHex && !engine.isHexBlockedByEnemyNearBase(c, r, true)) {
                         highlightFillPaint.setColor(0x30FFD54F);
                         canvas.drawPath(hexPath, highlightFillPaint);
                         hexStrokePaint.setColor(0xCCFFD54F);

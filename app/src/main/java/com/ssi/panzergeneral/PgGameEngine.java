@@ -405,6 +405,42 @@ public class PgGameEngine {
         return false;
     }
 
+    public boolean isCityAirportOrSupply(PgDatabase.HexCell cell) {
+        if (cell == null) return false;
+        return cell.terrainType == 8 || cell.terrainType == 6 || cell.isPort() || cell.isSupplyPoint() || cell.isObjective;
+    }
+
+    /**
+     * If an enemy unit is next to a city or supply area or airport,
+     * a new unit cannot be placed at that hex or any surrounding hex.
+     */
+    public boolean isHexBlockedByEnemyNearBase(int col, int row, boolean isAxis) {
+        if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return true;
+
+        // 1. Direct enemy presence on candidate hex or adjacent to candidate hex
+        if (hasEnemyAdjacentOrOnHex(col, row, isAxis)) {
+            return true;
+        }
+
+        // 2. If candidate hex itself is a city, airport, or supply area,
+        // and an enemy unit is next to it (or on it):
+        PgDatabase.HexCell cell = scenario.grid[col][row];
+        if (isCityAirportOrSupply(cell) && hasEnemyAdjacentOrOnHex(col, row, isAxis)) {
+            return true;
+        }
+
+        // 3. If candidate hex is a surrounding hex to any city, airport, or supply area
+        // that has an enemy unit next to it (or on it):
+        for (int[] nb : getNeighbors(col, row)) {
+            PgDatabase.HexCell nbCell = scenario.grid[nb[0]][nb[1]];
+            if (isCityAirportOrSupply(nbCell) && hasEnemyAdjacentOrOnHex(nb[0], nb[1], isAxis)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // =========================================================================
     // CAMPAIGN CORE DEPLOYMENT PHASE METHODS
     // =========================================================================
@@ -421,7 +457,7 @@ public class PgGameEngine {
             if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
                 // Ground units (in sea transports) and planes (in flight) can both deploy on water deploy hexes without a carrier
                 boolean allowWater = true;
-                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !hasEnemyAdjacentOrOnHex(dc, dr, true)) {
+                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !isHexBlockedByEnemyNearBase(dc, dr, true)) {
                     added[dc][dr] = true;
                     res.add(new int[]{dc, dr});
                 }
@@ -437,7 +473,7 @@ public class PgGameEngine {
                     if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
                         int c = other.col, r = other.row;
                         if (c >= 0 && c < scenario.cols && r >= 0 && r < scenario.rows) {
-                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !hasEnemyAdjacentOrOnHex(c, r, true)) {
+                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                                 added[c][r] = true;
                                 res.add(new int[]{c, r});
                             }
@@ -447,17 +483,19 @@ public class PgGameEngine {
             }
         }
 
-        // 3. Controlled cities (for ground), controlled airfields (for air), or controlled ports
-        int targetBaseTerrain = isAir ? 6 : 8;
+        // 3. Controlled cities (for ground), controlled airfields (for air), or controlled ports/supply areas
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
-                boolean isControlledBase = (cell.terrainType == targetBaseTerrain || (!isAir && cell.isPort()))
-                        && db.isAxisNation(cell.ownerNation, scenario);
+                boolean isBase = isAir ? (cell.terrainType == 6) : (cell.terrainType == 8 || cell.isPort() || cell.isSupplyPoint());
+                boolean isControlledBase = isBase && db.isAxisNation(cell.ownerNation, scenario);
                 if (isControlledBase) {
+                    // If an enemy unit is next to a city or supply area or airport,
+                    // a new unit cannot be placed at that hex or any surrounding hex.
                     if (hasEnemyAdjacentOrOnHex(c, r, true)) continue;
+
                     boolean allowWaterOnBase = cell.isWater() || cell.isPort() || cell.isDeployHex;
-                    if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase)) {
+                    if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                         added[c][r] = true;
                         res.add(new int[]{c, r});
                     }
@@ -466,7 +504,7 @@ public class PgGameEngine {
                         if (nc >= 0 && nc < scenario.cols && nr >= 0 && nr < scenario.rows) {
                             PgDatabase.HexCell nbCell = scenario.grid[nc][nr];
                             boolean allowWaterNb = cell.isPort() || nbCell.isDeployHex || nbCell.isPort();
-                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir, allowWaterNb) && !hasEnemyAdjacentOrOnHex(nc, nr, true)) {
+                            if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir, allowWaterNb) && !isHexBlockedByEnemyNearBase(nc, nr, true)) {
                                 added[nc][nr] = true;
                                 res.add(new int[]{nc, nr});
                             }
@@ -491,6 +529,7 @@ public class PgGameEngine {
 
     public boolean deployCoreUnit(PgDatabase.ActiveUnit u, int col, int row) {
         if (!isDeploymentPhase || u == null) return false;
+        if (isHexBlockedByEnemyNearBase(col, row, true)) return false;
         List<int[]> validSpots = getValidCoreDeploymentHexes(u);
         boolean valid = false;
         for (int[] s : validSpots) {
@@ -602,7 +641,7 @@ public class PgGameEngine {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
                     boolean allowWater = true;
-                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater)) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !isHexBlockedByEnemyNearBase(dc, dr, true)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
                     }
@@ -616,7 +655,7 @@ public class PgGameEngine {
                         if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
                             int c = other.col, r = other.row;
                             if (c >= 0 && c < scenario.cols && r >= 0 && r < scenario.rows) {
-                                if (!added[c][r] && canDeployAtHex(c, r, true, true) && !hasEnemyAdjacentOrOnHex(c, r, true)) {
+                                if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                                     added[c][r] = true;
                                     res.add(new int[]{c, r});
                                 }
@@ -625,17 +664,28 @@ public class PgGameEngine {
                     }
                 }
             }
-            int targetBaseTerrain = isAir ? 6 : 8;
             for (int c = 0; c < scenario.cols; c++) {
                 for (int r = 0; r < scenario.rows; r++) {
                     PgDatabase.HexCell cell = scenario.grid[c][r];
-                    boolean isControlledBase = (cell.terrainType == targetBaseTerrain || (!isAir && cell.isPort()))
-                            && db.isAxisNation(cell.ownerNation, scenario);
+                    boolean isBase = isAir ? (cell.terrainType == 6) : (cell.terrainType == 8 || cell.isPort() || cell.isSupplyPoint());
+                    boolean isControlledBase = isBase && db.isAxisNation(cell.ownerNation, scenario);
                     if (isControlledBase) {
+                        if (hasEnemyAdjacentOrOnHex(c, r, true)) continue;
                         boolean allowWaterOnBase = !isAir && (cell.isWater() || cell.isPort() || cell.isDeployHex);
-                        if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
+                        }
+                        for (int[] nb : getNeighbors(c, r)) {
+                            int nc = nb[0], nr = nb[1];
+                            if (nc >= 0 && nc < scenario.cols && nr >= 0 && nr < scenario.rows) {
+                                PgDatabase.HexCell nbCell = scenario.grid[nc][nr];
+                                boolean allowWaterNb = !isAir && (cell.isPort() || nbCell.isDeployHex || nbCell.isPort());
+                                if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir, allowWaterNb) && !isHexBlockedByEnemyNearBase(nc, nr, true)) {
+                                    added[nc][nr] = true;
+                                    res.add(new int[]{nc, nr});
+                                }
+                            }
                         }
                     }
                 }
@@ -649,7 +699,7 @@ public class PgGameEngine {
             for (int[] d : scenario.deployHexes) {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
-                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false, true)) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false, true) && !isHexBlockedByEnemyNearBase(dc, dr, true)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
                     }
@@ -659,7 +709,7 @@ public class PgGameEngine {
                 for (int r = 0; r < scenario.rows; r++) {
                     PgDatabase.HexCell cell = scenario.grid[c][r];
                     if (cell.terrainType == 8 && db.isAxisNation(cell.ownerNation, scenario)) {
-                        if (!added[c][r] && canDeployAtHex(c, r, false, false)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, false, false) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
@@ -674,10 +724,10 @@ public class PgGameEngine {
         boolean[][] added = new boolean[scenario.cols][scenario.rows];
 
         // 1994 Panzer General Rule:
-        // - Purchased ground units can only be placed on or adjacent to player-controlled cities (terrainType 8)
+        // - Purchased ground units can only be placed on or adjacent to player-controlled cities (terrainType 8) or supply areas
         // - Purchased planes can only be placed on or adjacent to player-controlled airports / airfields (terrainType 6)
         //   or on the same hex as other deployed friendly land units
-        // - If an enemy unit is on or next to the city or airport, it is under siege and NO units can be placed there!
+        // - If an enemy unit is on or next to a city or supply area or airport, a new unit cannot be placed at that hex or any surrounding hex!
         if (isAir) {
             for (PgDatabase.ActiveUnit other : units) {
                 if (other != null && other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
@@ -686,7 +736,7 @@ public class PgGameEngine {
                     if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
                         int c = other.col, r = other.row;
                         if (c >= 0 && c < scenario.cols && r >= 0 && r < scenario.rows) {
-                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !hasEnemyAdjacentOrOnHex(c, r, true)) {
+                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                                 added[c][r] = true;
                                 res.add(new int[]{c, r});
                             }
@@ -695,12 +745,12 @@ public class PgGameEngine {
                 }
             }
         }
-        int targetBaseTerrain = isAir ? 6 : 8;
 
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
-                if (cell.terrainType == targetBaseTerrain) {
+                boolean isBase = isAir ? (cell.terrainType == 6) : (cell.terrainType == 8 || cell.isPort() || cell.isSupplyPoint());
+                if (isBase) {
                     // Update ownership if currently occupied by an Axis ground unit capable of capturing
                     PgDatabase.ActiveUnit gndOcc = getUnitAt(c, r, false);
                     if (gndOcc != null && gndOcc.isAxis && canUnitCaptureCityOrAirport(gndOcc)
@@ -709,24 +759,25 @@ public class PgGameEngine {
                     }
 
                     if (db.isAxisNation(cell.ownerNation, scenario)) {
-                        // If enemy has a unit next to the city/airport (or on it), no units can be placed there
+                        // If enemy has a unit next to the city/supply area/airport (or on it),
+                        // no units can be placed at that hex or any surrounding hex
                         if (hasEnemyAdjacentOrOnHex(c, r, true)) {
                             continue;
                         }
 
-                        // Base hex itself (if unoccupied and valid)
-                        if (!added[c][r] && canDeployAtHex(c, r, isAir)) {
+                        // Base hex itself (if unoccupied, valid terrain, and not blocked)
+                        if (!added[c][r] && canDeployAtHex(c, r, isAir) && !isHexBlockedByEnemyNearBase(c, r, true)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
 
-                        // Adjacent hexagons next to the controlled city/airport
+                        // Adjacent hexagons next to the controlled city/airport/supply area
                         for (int[] nb : getNeighbors(c, r)) {
                             int nc = nb[0], nr = nb[1];
                             // Candidate deploy hex must be unoccupied, valid terrain,
-                            // and not adjacent to any enemy unit
+                            // and not blocked by enemy near any base
                             if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir)
-                                    && !hasEnemyAdjacentOrOnHex(nc, nr, true)) {
+                                    && !isHexBlockedByEnemyNearBase(nc, nr, true)) {
                                 added[nc][nr] = true;
                                 res.add(new int[]{nc, nr});
                             }
@@ -2732,6 +2783,7 @@ public class PgGameEngine {
             }
         }
         if (!validSpot) return null;
+        if (isHexBlockedByEnemyNearBase(col, row, true)) return null;
 
         axisPrestige -= totalCost;
         int curId = nextInstanceId++;
@@ -2775,14 +2827,22 @@ public class PgGameEngine {
         if (scenario == null) return res;
         boolean[][] added = new boolean[scenario.cols][scenario.rows];
 
-        // Any controlled objective or supply point
+        // Any controlled objective, city, airport, or supply point
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
                 boolean isAiOwned = cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, scenario);
-                if (isAiOwned && (cell.isObjective || cell.isSupplyPoint())) {
+                boolean isBase = isAir ? (cell.terrainType == 6 || cell.isObjective || cell.isSupplyPoint())
+                        : (cell.terrainType == 8 || cell.isObjective || cell.isSupplyPoint() || cell.isPort());
+                if (isAiOwned && isBase) {
+                    // If an enemy unit is next to a city or supply area or airport,
+                    // a new unit cannot be placed at that hex or any surrounding hex.
+                    if (hasEnemyAdjacentOrOnHex(c, r, false)) {
+                        continue;
+                    }
+
                     // Check if base hex itself is a valid spawn hex
-                    if (isHexValidForAiSpawn(c, r, isAir)) {
+                    if (isHexValidForAiSpawn(c, r, isAir) && !isHexBlockedByEnemyNearBase(c, r, false)) {
                         if (!added[c][r]) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
@@ -2794,7 +2854,7 @@ public class PgGameEngine {
                         if (nc >= 0 && nc < scenario.cols && nr >= 0 && nr < scenario.rows) {
                             PgDatabase.HexCell nbCell = scenario.grid[nc][nr];
                             boolean nbAiOwned = nbCell.ownerNation == 0 || !db.isAxisNation(nbCell.ownerNation, scenario);
-                            if (nbAiOwned && isHexValidForAiSpawn(nc, nr, isAir)) {
+                            if (nbAiOwned && isHexValidForAiSpawn(nc, nr, isAir) && !isHexBlockedByEnemyNearBase(nc, nr, false)) {
                                 if (!added[nc][nr]) {
                                     added[nc][nr] = true;
                                     res.add(new int[]{nc, nr});
@@ -2812,6 +2872,10 @@ public class PgGameEngine {
         if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
         PgDatabase.HexCell cell = scenario.grid[col][row];
         if (cell.ownerNation > 0 && db.isAxisNation(cell.ownerNation, scenario)) return false;
+
+        // If an enemy unit is next to a city or supply area or airport,
+        // a new unit cannot be placed at that hex or any surrounding hex.
+        if (isHexBlockedByEnemyNearBase(col, row, false)) return false;
 
         // No enemy (Axis) unit may occupy this hex on either layer
         PgDatabase.ActiveUnit gOn = getUnitAt(col, row, false);
@@ -2838,6 +2902,7 @@ public class PgGameEngine {
         PgDatabase.UnitDef def = db.equipment.get(unitDefId);
         if (def.isFortification() || def.unitClass == PgDatabase.CLASS_FORT) return null;
         if (alliedPrestige < def.cost) return null;
+        if (isHexBlockedByEnemyNearBase(col, row, false)) return null;
         if (getUnitAt(col, row, def.isAir()) != null) return null;
         PgDatabase.ActiveUnit otherLayer = getUnitAt(col, row, !def.isAir());
         if (otherLayer != null && otherLayer.isAxis) return null;

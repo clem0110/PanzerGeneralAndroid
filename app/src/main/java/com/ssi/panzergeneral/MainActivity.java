@@ -811,9 +811,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         if (!ok) {
             if (isAir) {
-                Toast.makeText(this, "Planes can only be placed on or next to controlled airports with no enemy adjacent.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Planes can only be placed on or next to secure controlled airports free from enemy contact.", Toast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(this, "Ground units can only be placed on or next to controlled cities with no enemy adjacent.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Ground units can only be placed on or next to secure controlled cities or supply areas free from enemy contact.", Toast.LENGTH_SHORT).show();
             }
             return;
         }
@@ -2140,7 +2140,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             if (isAir) {
                 Toast.makeText(this, "No secure airports available! Planes must be placed by friendly airports free from enemy contact.", Toast.LENGTH_LONG).show();
             } else {
-                Toast.makeText(this, "No secure cities available! Units must be placed by friendly cities free from enemy contact.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "No secure cities or supply areas available! Units must be placed by friendly cities or supply areas free from enemy contact.", Toast.LENGTH_LONG).show();
             }
             return;
         }
