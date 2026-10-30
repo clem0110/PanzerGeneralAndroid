@@ -259,6 +259,7 @@ public class PgGameEngine {
                 core.row = -1;
                 this.unplacedCoreUnits.add(core);
             }
+            sortUnplacedCoreUnits();
         } else {
             this.isDeploymentPhase = false;
         }
@@ -514,6 +515,30 @@ public class PgGameEngine {
         return true;
     }
 
+    public void sortUnitsByTypeAndName(List<PgDatabase.ActiveUnit> list) {
+        if (list == null || list.size() <= 1) return;
+        Collections.sort(list, (u1, u2) -> {
+            PgDatabase.UnitDef d1 = (u1 != null && u1.unitDefId > 0 && u1.unitDefId < db.equipment.size())
+                    ? db.equipment.get(u1.unitDefId) : null;
+            PgDatabase.UnitDef d2 = (u2 != null && u2.unitDefId > 0 && u2.unitDefId < db.equipment.size())
+                    ? db.equipment.get(u2.unitDefId) : null;
+            int c1 = d1 != null ? d1.unitClass : 999;
+            int c2 = d2 != null ? d2.unitClass : 999;
+            if (c1 != c2) return Integer.compare(c1, c2);
+            String n1 = d1 != null && d1.name != null ? d1.name : "";
+            String n2 = d2 != null && d2.name != null ? d2.name : "";
+            int nameCmp = n1.compareToIgnoreCase(n2);
+            if (nameCmp != 0) return nameCmp;
+            int id1 = u1 != null ? u1.instanceId : 0;
+            int id2 = u2 != null ? u2.instanceId : 0;
+            return Integer.compare(id1, id2);
+        });
+    }
+
+    public void sortUnplacedCoreUnits() {
+        sortUnitsByTypeAndName(unplacedCoreUnits);
+    }
+
     public boolean undeployCoreUnit(PgDatabase.ActiveUnit u) {
         if (!isDeploymentPhase || u == null || !u.isCore) return false;
         if (units.remove(u)) {
@@ -522,6 +547,7 @@ public class PgGameEngine {
             u.inSeaTransport = false;
             if (!unplacedCoreUnits.contains(u)) {
                 unplacedCoreUnits.add(u);
+                sortUnplacedCoreUnits();
             }
             recalculateFogOfWar();
             return true;
@@ -3749,6 +3775,7 @@ public class PgGameEngine {
             this.unplacedCoreUnits.clear();
             if (st.unplacedCoreUnits != null) {
                 this.unplacedCoreUnits.addAll(st.unplacedCoreUnits);
+                sortUnplacedCoreUnits();
             }
             this.isDeploymentPhase = st.isDeploymentPhase;
             for (int c = 0; c < scenario.cols && c < st.hexOwners.length; c++) {

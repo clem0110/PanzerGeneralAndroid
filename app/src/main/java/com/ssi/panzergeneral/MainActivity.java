@@ -1001,14 +1001,29 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             root.addView(emptyBox, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         } else {
+            engine.sortUnplacedCoreUnits();
             ScrollView scroll = new ScrollView(this);
             LinearLayout listLayout = new LinearLayout(this);
             listLayout.setOrientation(LinearLayout.VERTICAL);
             listLayout.setPadding(0, 10, 0, 20);
 
+            int lastClass = -1;
             for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
                 PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
                 if (def == null) continue;
+
+                if (def.unitClass != lastClass) {
+                    lastClass = def.unitClass;
+                    String categoryName = (def.unitClass >= 0 && def.unitClass < PgDatabase.CLASS_NAMES.length)
+                            ? PgDatabase.CLASS_NAMES[def.unitClass] : "Unit";
+                    TextView tvHeader = new TextView(this);
+                    tvHeader.setText("── " + categoryName.toUpperCase(Locale.ROOT) + " ──");
+                    tvHeader.setTextColor(0xFFFFD54F);
+                    tvHeader.setTextSize(12.5f);
+                    tvHeader.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvHeader.setPadding(10, 14, 10, 4);
+                    listLayout.addView(tvHeader);
+                }
 
                 LinearLayout card = new LinearLayout(this);
                 card.setOrientation(LinearLayout.HORIZONTAL);
@@ -1155,6 +1170,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 }
             }
         }
+        engine.sortUnitsByTypeAndName(eligible);
 
         AlertDialog.Builder b = new AlertDialog.Builder(this);
         String title = (gndOcc != null && airOcc == null)
