@@ -3,6 +3,7 @@ package com.ssi.panzergeneral;
 import android.content.Context;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import lombok.*;
 
 public class PgGameEngine {
@@ -127,7 +128,7 @@ public class PgGameEngine {
 
     // Campaign Core Deployment Phase
     public boolean isDeploymentPhase = false;
-    public final List<PgDatabase.ActiveUnit> unplacedCoreUnits = new ArrayList<>();
+    public final List<PgDatabase.ActiveUnit> unplacedCoreUnits = new CopyOnWriteArrayList<>();
 
     // Original Panzer General Preferences / Game Rules
     public boolean supplyEnabled = true;     // When OFF, units never run out of Fuel or Ammo
@@ -145,8 +146,8 @@ public class PgGameEngine {
     public boolean isPlayerTurn = true;
     public int scenarioOutcome = 0; // 0=Ongoing, 1=Decisive Victory, 2=Marginal Victory, 3=Loss
 
-    public final List<PgDatabase.ActiveUnit> units = new ArrayList<>();
-    public final List<PgDatabase.ActiveUnit> coreUnits = new ArrayList<>();
+    public final List<PgDatabase.ActiveUnit> units = new CopyOnWriteArrayList<>();
+    public final List<PgDatabase.ActiveUnit> coreUnits = new CopyOnWriteArrayList<>();
     public boolean[][] visibleHexes;
     public UndoMoveState lastUndoState = null;
     public CombatReport lastSurpriseReport = null;
@@ -218,6 +219,7 @@ public class PgGameEngine {
         }
 
         for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
+            if (u == null) continue;
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
             if (hasExistingCoreArmy && u.isAxis && u.isCore) {
                 if (def != null && def.isNaval()) {
@@ -245,6 +247,7 @@ public class PgGameEngine {
         if (hasExistingCoreArmy) {
             this.isDeploymentPhase = true;
             for (PgDatabase.ActiveUnit core : coreUnits) {
+                if (core == null) continue;
                 PgDatabase.UnitDef def = db.equipment.get(core.unitDefId);
                 core.movePointsUsed = 0;
                 core.moved = false;
@@ -274,7 +277,9 @@ public class PgGameEngine {
     public boolean isUnitOnAirLayer(PgDatabase.ActiveUnit u) {
         if (u == null) return false;
         if (u.inAirTransport) return true;
-        return db.equipment.get(u.unitDefId).isAir();
+        if (u.unitDefId <= 0 || u.unitDefId >= db.equipment.size()) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        return def != null && def.isAir();
     }
 
     public PgDatabase.UnitDef getAirTransportDef() {
@@ -426,7 +431,7 @@ public class PgGameEngine {
         // 2. Allow planes to be deployed on the same hex as other deployed units if they are land units
         if (isAir) {
             for (PgDatabase.ActiveUnit other : units) {
-                if (other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
+                if (other != null && other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
                     PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
                             ? db.equipment.get(other.unitDefId) : null;
                     if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
@@ -510,7 +515,7 @@ public class PgGameEngine {
             u.inSeaTransport = false;
         }
 
-        if (!units.contains(u)) {
+        if (u != null && !units.contains(u)) {
             units.add(u);
         }
         unplacedCoreUnits.remove(u);
@@ -520,7 +525,8 @@ public class PgGameEngine {
 
     public void sortUnitsByTypeAndName(List<PgDatabase.ActiveUnit> list) {
         if (list == null || list.size() <= 1) return;
-        Collections.sort(list, (u1, u2) -> {
+        List<PgDatabase.ActiveUnit> copy = new ArrayList<>(list);
+        Collections.sort(copy, (u1, u2) -> {
             PgDatabase.UnitDef d1 = (u1 != null && u1.unitDefId > 0 && u1.unitDefId < db.equipment.size())
                     ? db.equipment.get(u1.unitDefId) : null;
             PgDatabase.UnitDef d2 = (u2 != null && u2.unitDefId > 0 && u2.unitDefId < db.equipment.size())
@@ -536,6 +542,15 @@ public class PgGameEngine {
             int id2 = u2 != null ? u2.instanceId : 0;
             return Integer.compare(id1, id2);
         });
+        if (list instanceof CopyOnWriteArrayList) {
+            synchronized (list) {
+                list.clear();
+                list.addAll(copy);
+            }
+        } else {
+            list.clear();
+            list.addAll(copy);
+        }
     }
 
     public void sortUnplacedCoreUnits() {
@@ -561,7 +576,7 @@ public class PgGameEngine {
     public void startBattleAfterDeployment() {
         this.isDeploymentPhase = false;
         for (PgDatabase.ActiveUnit u : units) {
-            if (u.isAxis) {
+            if (u != null && u.isAxis) {
                 u.moved = false;
                 u.attacked = false;
                 u.movePointsUsed = 0;
@@ -595,7 +610,7 @@ public class PgGameEngine {
             }
             if (isAir) {
                 for (PgDatabase.ActiveUnit other : units) {
-                    if (other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
+                    if (other != null && other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
                         PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
                                 ? db.equipment.get(other.unitDefId) : null;
                         if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
@@ -665,7 +680,7 @@ public class PgGameEngine {
         // - If an enemy unit is on or next to the city or airport, it is under siege and NO units can be placed there!
         if (isAir) {
             for (PgDatabase.ActiveUnit other : units) {
-                if (other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
+                if (other != null && other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
                     PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
                             ? db.equipment.get(other.unitDefId) : null;
                     if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
@@ -772,7 +787,7 @@ public class PgGameEngine {
 
     public PgDatabase.ActiveUnit getUnitAt(int col, int row, boolean airLayer) {
         for (PgDatabase.ActiveUnit u : units) {
-            if (u.strength <= 0) continue;
+            if (u == null || u.strength <= 0) continue;
             if (u.col == col && u.row == row) {
                 if (isUnitOnAirLayer(u) == airLayer) return u;
             }
@@ -782,15 +797,19 @@ public class PgGameEngine {
 
     public PgDatabase.ActiveUnit getTopUnitAt(int col, int row, boolean preferAir) {
         PgDatabase.ActiveUnit first = getUnitAt(col, row, preferAir);
-        if (first != null) return first;
-        return getUnitAt(col, row, !preferAir);
+        if (first != null && first.strength > 0) return first;
+        PgDatabase.ActiveUnit second = getUnitAt(col, row, !preferAir);
+        if (second != null && second.strength > 0) return second;
+        return null;
     }
 
     public boolean isUnitVisibleToPlayer(PgDatabase.ActiveUnit u) {
         if (u == null || u.strength <= 0) return false;
         if (!fogOfWarEnabled || u.isAxis) return true;
-        if (visibleHexes == null || !visibleHexes[u.col][u.row]) return false;
+        if (visibleHexes == null || u.col < 0 || u.col >= scenario.cols || u.row < 0 || u.row >= scenario.rows || !visibleHexes[u.col][u.row]) return false;
+        if (u.unitDefId <= 0 || u.unitDefId >= db.equipment.size()) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def == null) return false;
         if (def.unitClass == PgDatabase.CLASS_SUBMARINE) {
             // Authentic Panzer General Rule (Strategy Guide p. 2484):
             // Adjacent submarines are always spotted.
@@ -815,7 +834,7 @@ public class PgGameEngine {
         Set<Integer> set = new HashSet<>();
         if (scenario == null || visibleHexes == null) return set;
         for (PgDatabase.ActiveUnit u : units) {
-            if (!u.isAxis && u.strength > 0 && isUnitVisibleToPlayer(u)) {
+            if (u != null && !u.isAxis && u.strength > 0 && isUnitVisibleToPlayer(u)) {
                 set.add(u.instanceId);
             }
         }
@@ -836,8 +855,10 @@ public class PgGameEngine {
         }
         if (!fogOfWarEnabled) return;
         for (PgDatabase.ActiveUnit u : units) {
-            if (!u.isAxis || u.strength <= 0) continue;
+            if (u == null || !u.isAxis || u.strength <= 0) continue;
+            if (u.unitDefId <= 0 || u.unitDefId >= db.equipment.size()) continue;
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+            if (def == null) continue;
             int spot = def.spotting;
             if (weatherEnabled) {
                 if (weather == 1) { // Overcast: Air spotting halved, ground spotting -1
@@ -1070,7 +1091,7 @@ public class PgGameEngine {
         boolean aAir = isUnitOnAirLayer(attacker);
 
         for (PgDatabase.ActiveUnit u : units) {
-            if (u.strength <= 0 || u.isAxis == attacker.isAxis) continue;
+            if (u == null || u.strength <= 0 || u.isAxis == attacker.isAxis) continue;
             if (fogOfWarEnabled && !isUnitVisibleToPlayer(u)) continue;
             int dist = hexDistance(attacker.col, attacker.row, u.col, u.row);
             boolean dAir = isUnitOnAirLayer(u);
@@ -1445,6 +1466,7 @@ public class PgGameEngine {
     }
 
     public int getEffectiveFiringStrength(PgDatabase.ActiveUnit u, PgDatabase.UnitDef def, boolean isAttacker) {
+        if (u == null || def == null) return 0;
         int str = Math.max(0, u.strength - u.suppression);
         if (str <= 0) return 0;
 
@@ -2735,8 +2757,10 @@ public class PgGameEngine {
                 .facingLeft(false)
                 .customTitle(curId + ". " + def.name)
                 .build();
-        units.add(u);
-        if (isCampaignMode) coreUnits.add(u);
+        if (u != null) {
+            units.add(u);
+            if (isCampaignMode) coreUnits.add(u);
+        }
         lastUndoState = null;
         recalculateFogOfWar();
         return u;
@@ -2844,7 +2868,9 @@ public class PgGameEngine {
                 .customTitle(curId + ". " + def.name)
                 .aiOrder((cell.isObjective || cell.isSupplyPoint()) && !def.isAir() ? 1 : 0)
                 .build();
-        units.add(u);
+        if (u != null) {
+            units.add(u);
+        }
         return u;
     }
 
@@ -2872,7 +2898,7 @@ public class PgGameEngine {
         int nearbyAxisAir = 0;
 
         for (PgDatabase.ActiveUnit ax : units) {
-            if (ax.isAxis && ax.strength > 0) {
+            if (ax != null && ax.isAxis && ax.strength > 0) {
                 int dist = hexDistance(col, row, ax.col, ax.row);
                 if (dist < minAxisDist) minAxisDist = dist;
                 PgDatabase.UnitDef axDef = db.equipment.get(ax.unitDefId);
@@ -3125,7 +3151,7 @@ public class PgGameEngine {
 
         // Reset AI units & clear suppression
         for (PgDatabase.ActiveUnit u : units) {
-            if (!u.isAxis && u.strength > 0) {
+            if (u != null && !u.isAxis && u.strength > 0) {
                 u.movePointsUsed = 0;
                 u.moved = false;
                 u.attacked = false;
@@ -3138,7 +3164,7 @@ public class PgGameEngine {
 
         List<PgDatabase.ActiveUnit> aiList = new ArrayList<>();
         for (PgDatabase.ActiveUnit u : units) {
-            if (!u.isAxis && u.strength > 0) aiList.add(u);
+            if (u != null && !u.isAxis && u.strength > 0) aiList.add(u);
         }
 
         // Identify strategic objective locations on the map
@@ -3156,7 +3182,7 @@ public class PgGameEngine {
                             boolean threatened = (occupant == null);
                             if (!threatened) {
                                 for (PgDatabase.ActiveUnit au : units) {
-                                    if (au.isAxis && au.strength > 0 && hexDistance(c, r, au.col, au.row) <= 4) {
+                                    if (au != null && au.isAxis && au.strength > 0 && hexDistance(c, r, au.col, au.row) <= 4) {
                                         threatened = true;
                                         break;
                                     }
@@ -3255,7 +3281,7 @@ public class PgGameEngine {
                     int bestPriority = -1;
                     int closestDist = 999;
                     for (PgDatabase.ActiveUnit eu : units) {
-                        if (eu.isAxis && eu.strength > 0 && isUnitOnAirLayer(eu)) {
+                        if (eu != null && eu.isAxis && eu.strength > 0 && isUnitOnAirLayer(eu)) {
                             PgDatabase.UnitDef eDef = db.equipment.get(eu.unitDefId);
                             int prio = (eDef.unitClass == PgDatabase.CLASS_LEVEL_BOMBER || eDef.unitClass == PgDatabase.CLASS_TAC_BOMBER) ? 2 : 1;
                             int d = hexDistance(ai.col, ai.row, eu.col, eu.row);
@@ -3269,7 +3295,7 @@ public class PgGameEngine {
                     // If no enemy aircraft, search for nearest Axis ground force to patrol
                     if (airTarget == null) {
                         for (PgDatabase.ActiveUnit eu : units) {
-                            if (eu.isAxis && eu.strength > 0) {
+                            if (eu != null && eu.isAxis && eu.strength > 0) {
                                 int d = hexDistance(ai.col, ai.row, eu.col, eu.row);
                                 if (d < closestDist) {
                                     closestDist = d;
@@ -3329,7 +3355,7 @@ public class PgGameEngine {
                     PgDatabase.ActiveUnit groundTarget = null;
                     int bestScore = -999;
                     for (PgDatabase.ActiveUnit eu : units) {
-                        if (eu.isAxis && eu.strength > 0 && !isUnitOnAirLayer(eu)) {
+                        if (eu != null && eu.isAxis && eu.strength > 0 && !isUnitOnAirLayer(eu)) {
                             PgDatabase.UnitDef eDef = db.equipment.get(eu.unitDefId);
                             int targetVal = 10;
                             if (eDef.unitClass == PgDatabase.CLASS_TANK) targetVal = 25;
@@ -3418,7 +3444,7 @@ public class PgGameEngine {
                 PgDatabase.ActiveUnit nearestEnemy = null;
                 int minEnemyDist = 999;
                 for (PgDatabase.ActiveUnit eu : units) {
-                    if (eu.isAxis && eu.strength > 0 && !isUnitOnAirLayer(eu)) {
+                    if (eu != null && eu.isAxis && eu.strength > 0 && !isUnitOnAirLayer(eu)) {
                         int d = hexDistance(ai.col, ai.row, eu.col, eu.row);
                         if (d < minEnemyDist) {
                             minEnemyDist = d;
@@ -3518,7 +3544,7 @@ public class PgGameEngine {
             PgDatabase.ActiveUnit nearestThreat = null;
             int minThreatDist = 999;
             for (PgDatabase.ActiveUnit eu : units) {
-                if (eu.isAxis && eu.strength > 0) {
+                if (eu != null && eu.isAxis && eu.strength > 0) {
                     int d = hexDistance(ai.col, ai.row, eu.col, eu.row);
                     if (d < minThreatDist) {
                         minThreatDist = d;
@@ -3612,7 +3638,7 @@ public class PgGameEngine {
 
             int tankCount = 0, infCount = 0, artyCount = 0, atCount = 0, aaCount = 0, airCount = 0;
             for (PgDatabase.ActiveUnit u : units) {
-                if (!u.isAxis && u.strength > 0) {
+                if (u != null && !u.isAxis && u.strength > 0) {
                     PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
                     if (d.unitClass == PgDatabase.CLASS_TANK) tankCount++;
                     else if (d.unitClass == PgDatabase.CLASS_INFANTRY) infCount++;
@@ -3712,11 +3738,12 @@ public class PgGameEngine {
             }
         }
 
-        Iterator<PgDatabase.ActiveUnit> it = units.iterator();
-        while (it.hasNext()) {
-            PgDatabase.ActiveUnit u = it.next();
-            if (u.strength <= 0) continue;
+        List<PgDatabase.ActiveUnit> crashedAirUnits = new ArrayList<>();
+        for (PgDatabase.ActiveUnit u : units) {
+            if (u == null || u.strength <= 0) continue;
+            if (u.unitDefId <= 0 || u.unitDefId >= db.equipment.size()) continue;
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+            if (def == null) continue;
             if (u.movePointsUsed == 0 && !u.moved && !u.attacked && !isUnitOnAirLayer(u) && !u.inSeaTransport && !def.isNaval()) {
                 int maxEnt = scenario.grid[u.col][u.row].getBaseEntrenchment() + 3;
                 if (u.entrenchment < maxEnt) u.entrenchment++;
@@ -3736,7 +3763,8 @@ public class PgGameEngine {
                     boolean nearCarrier = false;
                     for (int[] nb : getNeighbors(u.col, u.row)) {
                         PgDatabase.ActiveUnit sea = getUnitAt(nb[0], nb[1], false);
-                        if (sea != null && sea.isAxis && db.equipment.get(sea.unitDefId).unitClass == PgDatabase.CLASS_CARRIER) {
+                        if (sea != null && sea.isAxis && sea.unitDefId > 0 && sea.unitDefId < db.equipment.size()
+                                && db.equipment.get(sea.unitDefId).unitClass == PgDatabase.CLASS_CARRIER) {
                             nearCarrier = true;
                             break;
                         }
@@ -3747,10 +3775,13 @@ public class PgGameEngine {
                     } else if (u.fuel <= 0) {
                         // Panzer General Air Fuel Rule: Air unit out of fuel away from airfield/carrier crashes
                         u.strength = 0;
-                        it.remove();
+                        crashedAirUnits.add(u);
                     }
                 }
             }
+        }
+        if (!crashedAirUnits.isEmpty()) {
+            units.removeAll(crashedAirUnits);
         }
 
         isPlayerTurn = true;
@@ -3771,7 +3802,7 @@ public class PgGameEngine {
         if (ai.transportDefId > 0 && !ai.moved && ai.movePointsUsed == 0) {
             boolean nearEnemy = false;
             for (PgDatabase.ActiveUnit e : units) {
-                if (e.isAxis && e.strength > 0 && hexDistance(ai.col, ai.row, e.col, e.row) <= 2) {
+                if (e != null && e.isAxis && e.strength > 0 && hexDistance(ai.col, ai.row, e.col, e.row) <= 2) {
                     nearEnemy = true;
                     break;
                 }
@@ -3833,7 +3864,7 @@ public class PgGameEngine {
             PgDatabase.ActiveUnit nearestEnemy = null;
             int minEnemyDist = 999;
             for (PgDatabase.ActiveUnit eu : units) {
-                if (eu.isAxis && eu.strength > 0 && !isUnitOnAirLayer(eu)) {
+                if (eu != null && eu.isAxis && eu.strength > 0 && !isUnitOnAirLayer(eu)) {
                     int d = hexDistance(ai.col, ai.row, eu.col, eu.row);
                     if (d < minEnemyDist) {
                         minEnemyDist = d;
@@ -4106,12 +4137,22 @@ public class PgGameEngine {
             this.fogOfWarEnabled = st.fogOfWarEnabled;
             if (st.prestigeModifier > 0) this.prestigeModifier = st.prestigeModifier;
             this.units.clear();
-            this.units.addAll(st.units);
+            if (st.units != null) {
+                for (PgDatabase.ActiveUnit u : st.units) {
+                    if (u != null && u.strength > 0) this.units.add(u);
+                }
+            }
             this.coreUnits.clear();
-            this.coreUnits.addAll(st.coreRoster);
+            if (st.coreRoster != null) {
+                for (PgDatabase.ActiveUnit u : st.coreRoster) {
+                    if (u != null) this.coreUnits.add(u);
+                }
+            }
             this.unplacedCoreUnits.clear();
             if (st.unplacedCoreUnits != null) {
-                this.unplacedCoreUnits.addAll(st.unplacedCoreUnits);
+                for (PgDatabase.ActiveUnit u : st.unplacedCoreUnits) {
+                    if (u != null) this.unplacedCoreUnits.add(u);
+                }
                 sortUnplacedCoreUnits();
             }
             this.isDeploymentPhase = st.isDeploymentPhase;

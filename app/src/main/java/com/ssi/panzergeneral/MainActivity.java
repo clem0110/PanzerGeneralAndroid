@@ -595,7 +595,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         // Center camera on first Axis unit
         boolean centered = false;
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u.isAxis && u.col >= 0 && u.row >= 0) {
+            if (u != null && u.isAxis && u.strength > 0 && u.col >= 0 && u.row >= 0) {
                 mapView.post(() -> {
                     mapView.centerOnHex(u.col, u.row);
                     mapView.selectUnit(u);
@@ -1265,7 +1265,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
         for (int i = 0; i < engine.units.size(); i++) {
             PgDatabase.ActiveUnit u = engine.units.get((startIdx + i) % engine.units.size());
-            if (engine.hasAvailableAction(u)) {
+            if (u != null && engine.hasAvailableAction(u)) {
                 if (u == mapView.selectedUnit) {
                     Toast.makeText(this, "Only " + db.equipment.get(u.unitDefId).name + " has actions remaining.", Toast.LENGTH_SHORT).show();
                 }

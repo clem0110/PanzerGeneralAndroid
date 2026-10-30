@@ -344,7 +344,7 @@ public class PgMapView extends View {
                     PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(attacker);
                     sounds.playCombatSound(aDef);
                     triggerExplosion(rep.targetCol, rep.targetRow, rep);
-                    if (attacker.strength > 0) {
+                    if (attacker != null && attacker.strength > 0) {
                         selectUnit(attacker);
                     } else {
                         clearSelection();
@@ -357,7 +357,7 @@ public class PgMapView extends View {
             PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(attacker);
             sounds.playCombatSound(aDef);
             triggerExplosion(target.col, target.row, rep);
-            if (attacker.strength > 0) {
+            if (attacker != null && attacker.strength > 0) {
                 selectUnit(attacker);
             } else {
                 clearSelection();
@@ -496,7 +496,7 @@ public class PgMapView extends View {
                     } else {
                         sounds.playMoveSound(def);
                     }
-                    if (selectedUnit.strength > 0) {
+                    if (selectedUnit != null && selectedUnit.strength > 0) {
                         selectUnit(selectedUnit);
                     } else {
                         clearSelection();
@@ -769,6 +769,8 @@ public class PgMapView extends View {
 
                 PgDatabase.ActiveUnit groundUnit = engine.getUnitAt(c, r, false);
                 PgDatabase.ActiveUnit airUnit = engine.getUnitAt(c, r, true);
+                if (groundUnit != null && groundUnit.strength <= 0) groundUnit = null;
+                if (airUnit != null && airUnit.strength <= 0) airUnit = null;
                 if (ghostDefender != null && ghostDefender.col == c && ghostDefender.row == r) {
                     if (engine.isUnitOnAirLayer(ghostDefender)) {
                         if (airUnit == null) airUnit = ghostDefender;
@@ -797,6 +799,7 @@ public class PgMapView extends View {
 
                 // Draw valid target crosshair overlay + Panzer General Combat Prediction Odds badge
                 for (PgDatabase.ActiveUnit target : validTargets) {
+                    if (target == null || target.strength <= 0) continue;
                     if (target.col == c && target.row == r) {
                         buildHexPath(x, y);
                         highlightFillPaint.setColor(0x45FF1744);
@@ -867,6 +870,7 @@ public class PgMapView extends View {
     }
 
     private void drawSingleUnit(Canvas canvas, PgDatabase.ActiveUnit u, float x, float y, boolean dimmed) {
+        if (u == null || u.strength <= 0) return;
         int iconIdx = engine.getEffectiveIconId(u);
 
         Bitmap unitBmp = assets.getSprite("TACICONS.SHP", iconIdx, u.facingLeft);
@@ -1110,7 +1114,7 @@ public class PgMapView extends View {
         }
 
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u.strength <= 0) continue;
+            if (u == null || u.strength <= 0) continue;
             if (!engine.isUnitVisibleToPlayer(u)) continue;
             float cx = startX + (u.col + 0.5f) * cellW;
             float cy = startY + (u.row + 0.5f) * cellW;
