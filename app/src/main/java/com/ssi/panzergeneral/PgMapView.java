@@ -927,6 +927,27 @@ public class PgMapView extends View {
         RectF r = new RectF(bx, by, bx + bw, by + bh);
         canvas.drawRoundRect(r, 12f, 12f, badgePaint);
 
+        if (rep.isEscortDogfight) {
+            hexStrokePaint.setColor(0xFF00E5FF);
+            hexStrokePaint.setStrokeWidth(2.4f);
+            canvas.drawRoundRect(r, 12f, 12f, hexStrokePaint);
+
+            textPaint.setColor(0xFFFFD54F);
+            textPaint.setTextSize(20.5f);
+            String headline = "FIGHTER ESCORT DOGFIGHT! " + rep.attackerName + " vs " + rep.defenderName;
+            canvas.drawText(headline, bx + bw * 0.5f, by + 28f, textPaint);
+
+            textPaint.setColor(Color.WHITE);
+            textPaint.setTextSize(17.5f);
+            String intLossTag = rep.defenderDestroyed ? " (SHOT DOWN!)" : (rep.defenderSuppressed > 0 ? " (" + rep.defenderSuppressed + " Supp)" : "");
+            String escLossTag = rep.attackerDestroyed ? " (LOST)" : "";
+            String detail = String.format(Locale.ROOT, "Enemy Interceptor: -%d%s   |   Friendly Escort: -%d%s",
+                    rep.defenderLosses, intLossTag,
+                    rep.attackerLosses, escLossTag);
+            canvas.drawText(detail, bx + bw * 0.5f, by + 57f, textPaint);
+            return;
+        }
+
         if (rep.isDefensiveSupport) {
             hexStrokePaint.setColor(0xFFFFB300);
             hexStrokePaint.setStrokeWidth(2.4f);
@@ -964,10 +985,13 @@ public class PgMapView extends View {
         if (rep.submarineDived) extra += " [SUB DIVED & EVADED!]";
         else if (rep.defenderSurrendered) extra += " [SURRENDERED!]";
         else if (rep.defenderRetreated) extra += " [RETREATED]";
-        if (rep.interceptorUnit != null) extra += " [INTERCEPTED]";
-        else if (rep.supportReport != null) {
+        if (rep.supportReport != null && rep.supportReport.isEscortDogfight) {
+            extra += " [ESCORT PROTECTED BOMBER]";
+        } else if (rep.supportReport != null && rep.supportReport.isDefensiveSupport) {
             extra += String.format(Locale.ROOT, " [ARTY SUP: -%d / %d SUPP]",
                     rep.supportReport.defenderLosses, rep.supportReport.defenderSuppressed);
+        } else if (rep.interceptorUnit != null) {
+            extra += " [INTERCEPTED]";
         } else if (rep.supportUnit != null) {
             extra += " [ARTY SUPPORT]";
         }

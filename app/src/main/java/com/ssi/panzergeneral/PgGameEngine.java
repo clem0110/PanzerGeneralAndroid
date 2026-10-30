@@ -49,6 +49,7 @@ public class PgGameEngine {
         public PgDatabase.ActiveUnit interceptorUnit;
         public int targetCol, targetRow;
         public boolean isDefensiveSupport;
+        public boolean isEscortDogfight;
         public CombatReport supportReport;
     }
 
@@ -1627,7 +1628,44 @@ public class PgGameEngine {
 
         PgDatabase.ActiveUnit support = findDefensiveSupport(attacker, defender);
         boolean artillerySupport = (support != null && dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender));
-        boolean fighterInterceptor = (findAirInterceptorOrFlak(attacker, defender) != null);
+        PgDatabase.ActiveUnit interceptor = findAirInterceptorOrFlak(attacker, defender);
+        boolean fighterInterceptor = (interceptor != null);
+        PgDatabase.ActiveUnit escort = (fighterInterceptor && isUnitOnAirLayer(attacker)) ? findFighterEscort(attacker) : null;
+
+        if (fighterInterceptor) {
+            PgDatabase.UnitDef iDef = getEffectiveUnitDef(interceptor);
+            boolean isFighter = (iDef != null && iDef.unitClass == PgDatabase.CLASS_FIGHTER);
+            if (isFighter && escort != null) {
+                // Escort engages interceptor: reduces or eliminates interceptor threat to bomber
+                PgDatabase.UnitDef eDef = getEffectiveUnitDef(escort);
+                int eAtk = getStrategyGuideAttackGrade(escort, eDef, interceptor, iDef, 1, false);
+                int iDefGrd = getStrategyGuideDefenseGrade(escort, eDef, interceptor, iDef, 1, false);
+                int eEff = calculateEffectiveDifference(eAtk, iDefGrd);
+                int eStr = getEffectiveFiringStrength(escort, eDef, true);
+                double ePHit = (eAtk > 0) ? getD20HitProbability(eEff, false) : 0.0;
+                double ePSupp = (eAtk > 0) ? getD20SuppProbability(eEff, false) : 0.0;
+                double expIntKills = Math.min(interceptor.strength, eStr * ePHit);
+                double expIntSupp = Math.min(interceptor.strength - expIntKills, eStr * ePSupp);
+
+                int remIntStr = (int) Math.max(0, interceptor.strength - expIntKills - expIntSupp);
+                if (remIntStr > 0) {
+                    int iAtk = getStrategyGuideAttackGrade(interceptor, iDef, attacker, aDef, 1, false);
+                    int aGrd = getStrategyGuideDefenseGrade(interceptor, iDef, attacker, aDef, 1, false);
+                    double iPHit = (iAtk > 0) ? getD20HitProbability(calculateEffectiveDifference(iAtk, aGrd), false) : 0.0;
+                    double expBLoss = Math.min(attacker.strength, remIntStr * iPHit);
+                    expAtkLosses += expBLoss;
+                    atkStr = (int) Math.max(0, atkStr - expBLoss);
+                }
+            } else {
+                int iStr = getEffectiveFiringStrength(interceptor, iDef, true);
+                int iAtk = getStrategyGuideAttackGrade(interceptor, iDef, attacker, aDef, 1, false);
+                int aGrd = getStrategyGuideDefenseGrade(interceptor, iDef, attacker, aDef, 1, false);
+                double iPHit = (iAtk > 0) ? getD20HitProbability(calculateEffectiveDifference(iAtk, aGrd), false) : 0.0;
+                double expBLoss = Math.min(attacker.strength, iStr * iPHit);
+                expAtkLosses += expBLoss;
+                atkStr = (int) Math.max(0, atkStr - expBLoss);
+            }
+        }
 
         if (artillerySupport) {
             PgDatabase.UnitDef sDef = getEffectiveUnitDef(support);
@@ -1647,11 +1685,13 @@ public class PgGameEngine {
 
         int expectedDefenderLosses = (int) Math.round(expDefLosses);
         int expectedAttackerLosses = (int) Math.round(expAtkLosses);
-        String summary = String.format(Locale.ROOT, "Expected: Atk -%d vs Def -%d (Ini %d:%d)%s%s",
+        String interceptorTag = fighterInterceptor ? (escort != null ? " [Escort vs Interceptor]" : " [Interceptor]") : "";
+        String summary = String.format(Locale.ROOT, "Expected: Atk -%d vs Def -%d (Ini %d:%d)%s%s%s",
                 expectedAttackerLosses, expectedDefenderLosses,
                 aIni, dIni,
                 ruggedDefenseChance ? " [Rugged Def Risk]" : "",
-                fighterInterceptor ? " [Interceptor]" : (artillerySupport ? " [Artillery Sup]" : ""));
+                interceptorTag,
+                artillerySupport ? " [Artillery Sup]" : "");
 
         return CombatPrediction.builder()
                 .effectiveAttackerIni(aIni)
@@ -1701,12 +1741,84 @@ public class PgGameEngine {
         PgDatabase.ActiveUnit interceptor = findAirInterceptorOrFlak(attacker, defender);
         if (interceptor != null) {
             rep.interceptorUnit = interceptor;
-            if (supplyEnabled) {
-                interceptor.ammo = Math.max(0, interceptor.ammo - 1);
+            PgDatabase.UnitDef iDef = getEffectiveUnitDef(interceptor);
+            boolean isFighterInterceptor = (iDef != null && iDef.unitClass == PgDatabase.CLASS_FIGHTER);
+
+            if (isFighterInterceptor) {
+                // Check if the attacking bomber has a friendly Fighter Escort
+                PgDatabase.ActiveUnit escort = findFighterEscort(attacker);
+                if (escort != null) {
+                    rep.supportUnit = escort;
+                    // Fighter Escort attacks the Enemy Fighter Interceptor FIRST!
+                    CombatReport dogfightRep = resolveEscortDogfight(escort, interceptor);
+                    rep.supportReport = dogfightRep;
+
+                    int unsuppressedIntStr = getEffectiveFiringStrength(interceptor, iDef, true);
+                    if (unsuppressedIntStr > 0 && interceptor.strength > 0) {
+                        // Surviving unsuppressed interceptor attacks the bomber
+                        if (supplyEnabled && iDef.maxAmmo > 0) {
+                            interceptor.ammo = Math.max(0, interceptor.ammo - 1);
+                        }
+                        int iAtk = getStrategyGuideAttackGrade(interceptor, iDef, attacker, aDef, 1, false);
+                        int aGrd = getStrategyGuideDefenseGrade(interceptor, iDef, attacker, aDef, 1, false);
+                        int effDiff = calculateEffectiveDifference(iAtk, aGrd);
+                        int[] iRes = resolveD20Fire(unsuppressedIntStr, effDiff, false);
+                        int bLoss = Math.min(attacker.strength, iRes[0]);
+                        int bSupp = Math.min(attacker.strength - bLoss, iRes[1]);
+                        attacker.strength = Math.max(0, attacker.strength - bLoss);
+                        attacker.suppression = Math.min(attacker.strength, attacker.suppression + bSupp);
+                        rep.attackerLosses += bLoss;
+                        if (attacker.strength <= 0) {
+                            rep.attackerDestroyed = true;
+                            attacker.attacked = true;
+                            units.remove(attacker);
+                            return rep;
+                        }
+                    }
+                } else {
+                    // No escort: Interceptor attacks bomber directly with full strength
+                    if (supplyEnabled && iDef.maxAmmo > 0) {
+                        interceptor.ammo = Math.max(0, interceptor.ammo - 1);
+                    }
+                    int iStr = getEffectiveFiringStrength(interceptor, iDef, true);
+                    int iAtk = getStrategyGuideAttackGrade(interceptor, iDef, attacker, aDef, 1, false);
+                    int aGrd = getStrategyGuideDefenseGrade(interceptor, iDef, attacker, aDef, 1, false);
+                    int effDiff = calculateEffectiveDifference(iAtk, aGrd);
+                    int[] iRes = resolveD20Fire(iStr, effDiff, false);
+                    int bLoss = Math.min(attacker.strength, iRes[0]);
+                    int bSupp = Math.min(attacker.strength - bLoss, iRes[1]);
+                    attacker.strength = Math.max(0, attacker.strength - bLoss);
+                    attacker.suppression = Math.min(attacker.strength, attacker.suppression + bSupp);
+                    rep.attackerLosses += bLoss;
+                    if (attacker.strength <= 0) {
+                        rep.attackerDestroyed = true;
+                        attacker.attacked = true;
+                        units.remove(attacker);
+                        return rep;
+                    }
+                }
+            } else {
+                // Ground Air Defense (Flak) interception
+                if (supplyEnabled && iDef != null && iDef.maxAmmo > 0) {
+                    interceptor.ammo = Math.max(0, interceptor.ammo - 1);
+                }
+                int flakStr = getEffectiveFiringStrength(interceptor, iDef, true);
+                int flakAtk = getStrategyGuideAttackGrade(interceptor, iDef, attacker, aDef, dist, false);
+                int aGrd = getStrategyGuideDefenseGrade(interceptor, iDef, attacker, aDef, dist, false);
+                int effDiff = calculateEffectiveDifference(flakAtk, aGrd);
+                int[] fRes = resolveD20Fire(flakStr, effDiff, false);
+                int bLoss = Math.min(attacker.strength, fRes[0]);
+                int bSupp = Math.min(attacker.strength - bLoss, fRes[1]);
+                attacker.strength = Math.max(0, attacker.strength - bLoss);
+                attacker.suppression = Math.min(attacker.strength, attacker.suppression + bSupp);
+                rep.attackerLosses += bLoss;
+                if (attacker.strength <= 0) {
+                    rep.attackerDestroyed = true;
+                    attacker.attacked = true;
+                    units.remove(attacker);
+                    return rep;
+                }
             }
-            int intLoss = 1 + rng.nextInt(2);
-            attacker.strength = Math.max(0, attacker.strength - intLoss);
-            rep.attackerLosses += intLoss;
         }
 
         // 2. Check Defensive Artillery Support against ground close assault
@@ -1989,6 +2101,135 @@ public class PgGameEngine {
         recalculateFogOfWar();
         checkVictoryConditions();
         return rep;
+    }
+
+    public PgDatabase.ActiveUnit findFighterEscort(PgDatabase.ActiveUnit bomber) {
+        if (bomber == null || !isUnitOnAirLayer(bomber)) return null;
+        PgDatabase.UnitDef bDef = getEffectiveUnitDef(bomber);
+        if (bDef == null || (bDef.unitClass != PgDatabase.CLASS_TAC_BOMBER && bDef.unitClass != PgDatabase.CLASS_LEVEL_BOMBER && !bomber.inAirTransport)) {
+            return null;
+        }
+
+        PgDatabase.ActiveUnit bestEscort = null;
+        int bestStr = -1;
+        // Check adjacent hexes (and same hex if sharing)
+        for (int[] nb : getNeighbors(bomber.col, bomber.row)) {
+            PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], true);
+            if (adj != null && adj.isAxis == bomber.isAxis && adj.strength > 0
+                    && (!supplyEnabled || (adj.ammo > 0 && adj.fuel > 0))) {
+                PgDatabase.UnitDef fDef = getEffectiveUnitDef(adj);
+                if (fDef != null && fDef.unitClass == PgDatabase.CLASS_FIGHTER) {
+                    int effStr = getEffectiveFiringStrength(adj, fDef, true);
+                    if (effStr > bestStr) {
+                        bestStr = effStr;
+                        bestEscort = adj;
+                    }
+                }
+            }
+        }
+        return (bestStr > 0) ? bestEscort : null;
+    }
+
+    public CombatReport resolveEscortDogfight(PgDatabase.ActiveUnit escort, PgDatabase.ActiveUnit interceptor) {
+        if (escort == null || interceptor == null) return null;
+        PgDatabase.UnitDef eDef = getEffectiveUnitDef(escort);
+        PgDatabase.UnitDef iDef = getEffectiveUnitDef(interceptor);
+        if (eDef == null || iDef == null) return null;
+
+        if (supplyEnabled) {
+            if (eDef.maxAmmo > 0) escort.ammo = Math.max(0, escort.ammo - 1);
+            if (iDef.maxAmmo > 0) interceptor.ammo = Math.max(0, interceptor.ammo - 1);
+        }
+
+        // Air-to-air dogfight grades
+        int eAtkGrade = getStrategyGuideAttackGrade(escort, eDef, interceptor, iDef, 1, false);
+        int iDefGrade = getStrategyGuideDefenseGrade(escort, eDef, interceptor, iDef, 1, false);
+        int eEffDiff = calculateEffectiveDifference(eAtkGrade, iDefGrade);
+
+        int iAtkGrade = getStrategyGuideAttackGrade(interceptor, iDef, escort, eDef, 1, false);
+        int eDefGrade = getStrategyGuideDefenseGrade(interceptor, iDef, escort, eDef, 1, false);
+        int iEffDiff = calculateEffectiveDifference(iAtkGrade, eDefGrade);
+
+        int eStr = getEffectiveFiringStrength(escort, eDef, true);
+        int iStr = getEffectiveFiringStrength(interceptor, iDef, false);
+
+        int eIni = eDef.initiative + escort.getStars() + rng.nextInt(3) + 1;
+        int iIni = iDef.initiative + interceptor.getStars() + rng.nextInt(3) + 1;
+
+        int intLoss = 0, intSupp = 0;
+        int escLoss = 0, escSupp = 0;
+
+        // Fighter Escort attacks the Enemy Fighter Interceptor FIRST!
+        if (eIni >= iIni) {
+            if (eAtkGrade > 0 && eStr > 0) {
+                int[] res = resolveD20Fire(eStr, eEffDiff, false);
+                intLoss = Math.min(interceptor.strength, res[0]);
+                intSupp = Math.min(interceptor.strength - intLoss, res[1]);
+            }
+            int remIntStr = Math.max(0, iStr - intLoss - intSupp);
+            if (iAtkGrade > 0 && remIntStr > 0) {
+                int[] res = resolveD20Fire(remIntStr, iEffDiff, false);
+                escLoss = Math.min(escort.strength, res[0]);
+                escSupp = Math.min(escort.strength - escLoss, res[1]);
+            }
+        } else {
+            if (iAtkGrade > 0 && iStr > 0) {
+                int[] res = resolveD20Fire(iStr, iEffDiff, false);
+                escLoss = Math.min(escort.strength, res[0]);
+                escSupp = Math.min(escort.strength - escLoss, res[1]);
+            }
+            int remEscStr = Math.max(0, eStr - escLoss - escSupp);
+            if (eAtkGrade > 0 && remEscStr > 0) {
+                int[] res = resolveD20Fire(remEscStr, eEffDiff, false);
+                intLoss = Math.min(interceptor.strength, res[0]);
+                intSupp = Math.min(interceptor.strength - intLoss, res[1]);
+            }
+        }
+
+        int origIntStr = interceptor.strength;
+        interceptor.strength = Math.max(0, interceptor.strength - intLoss);
+        interceptor.suppression = Math.min(interceptor.strength, interceptor.suppression + intSupp);
+        escort.strength = Math.max(0, escort.strength - escLoss);
+        escort.suppression = Math.min(escort.strength, escort.suppression + escSupp);
+
+        escort.experience = Math.min(500, escort.experience + intLoss * 12 + 5);
+        interceptor.experience = Math.min(500, interceptor.experience + escLoss * 12 + 5);
+
+        boolean interceptorDestroyed = (interceptor.strength <= 0);
+        if (interceptorDestroyed) {
+            units.remove(interceptor);
+            int baseP = Math.max(1, iDef.cost / 10);
+            int reward = (baseP * (interceptor.getStars() + 1)) / 2;
+            if (escort.isAxis) axisPrestige += reward; else alliedPrestige += reward;
+        }
+
+        boolean escortDestroyed = (escort.strength <= 0);
+        if (escortDestroyed) {
+            units.remove(escort);
+            int baseP = Math.max(1, eDef.cost / 10);
+            int reward = (baseP * (escort.getStars() + 1)) / 2;
+            if (interceptor.isAxis) axisPrestige += reward; else alliedPrestige += reward;
+        }
+
+        return CombatReport.builder()
+                .attackerName(eDef.name)
+                .defenderName(iDef.name)
+                .attackerId(escort.instanceId)
+                .defenderId(interceptor.instanceId)
+                .attackerIconId(getEffectiveIconId(escort))
+                .defenderIconId(getEffectiveIconId(interceptor))
+                .attackerStartStr(escort.strength + escLoss)
+                .defenderStartStr(origIntStr)
+                .attackerLosses(escLoss)
+                .defenderLosses(intLoss)
+                .defenderSuppressed(intSupp)
+                .attackerDestroyed(escortDestroyed)
+                .defenderDestroyed(interceptorDestroyed)
+                .targetCol(interceptor.col)
+                .targetRow(interceptor.row)
+                .supportUnit(escort)
+                .isEscortDogfight(true)
+                .build();
     }
 
     private PgDatabase.ActiveUnit findAirInterceptorOrFlak(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
