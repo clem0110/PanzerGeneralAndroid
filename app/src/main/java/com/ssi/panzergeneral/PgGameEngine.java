@@ -2277,6 +2277,7 @@ public class PgGameEngine {
     public PgDatabase.ActiveUnit purchaseUnit(int unitDefId, int transportDefId, int col, int row) {
         if (unitDefId <= 0 || unitDefId >= db.equipment.size()) return null;
         PgDatabase.UnitDef def = db.equipment.get(unitDefId);
+        if (def.isFortification() || def.unitClass == PgDatabase.CLASS_FORT) return null;
         int totalCost = def.cost;
         if (transportDefId > 0 && transportDefId < db.equipment.size()) {
             totalCost += db.equipment.get(transportDefId).cost / 2;
@@ -2345,6 +2346,7 @@ public class PgGameEngine {
     public PgDatabase.ActiveUnit purchaseAiUnit(int unitDefId, int col, int row) {
         if (unitDefId <= 0 || unitDefId >= db.equipment.size()) return null;
         PgDatabase.UnitDef def = db.equipment.get(unitDefId);
+        if (def.isFortification() || def.unitClass == PgDatabase.CLASS_FORT) return null;
         if (alliedPrestige < def.cost) return null;
         if (getUnitAt(col, row, def.isAir()) != null) return null;
 
@@ -2966,7 +2968,7 @@ public class PgGameEngine {
                 for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
                     if (!u.isAxis && u.unitDefId > 0 && u.unitDefId < db.equipment.size()) {
                         PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
-                        if (!d.isAir() && !d.isNaval() && d.cost <= alliedPrestige) {
+                        if (!d.isAir() && !d.isNaval() && !d.isFortification() && d.unitClass != PgDatabase.CLASS_FORT && d.unitClass != PgDatabase.CLASS_LAND_TRANSPORT && d.cost <= alliedPrestige) {
                             int fitScore = d.cost;
                             if (infCount < 3 && d.unitClass == PgDatabase.CLASS_INFANTRY) fitScore += 50;
                             if (artyCount < 2 && d.unitClass == PgDatabase.CLASS_ARTILLERY) fitScore += 40;

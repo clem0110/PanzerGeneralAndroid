@@ -1428,7 +1428,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             if (u.unitClass == PgDatabase.CLASS_LAND_TRANSPORT
                     || u.unitClass == PgDatabase.CLASS_AIR_TRANSPORT
                     || u.unitClass == PgDatabase.CLASS_SEA_TRANSPORT
-                    || u.unitClass == PgDatabase.CLASS_FORT) continue;
+                    || u.unitClass == PgDatabase.CLASS_FORT
+                    || u.isFortification()) continue;
             // Authentic German Wehrmacht / Luftwaffe equipment entries in PANZEQUP.EQP
             if (u.id <= 112 || u.id == 160 || u.id == 330 || u.id == 422) {
                 if (allYears || (u.startYear <= curYear && u.endYear >= curYear)) {
@@ -1440,7 +1441,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             for (int i = 1; i < Math.min(115, db.equipment.size()); i++) {
                 PgDatabase.UnitDef u = db.equipment.get(i);
                 if (!u.name.isEmpty() && !u.name.equalsIgnoreCase("RESERVED")) {
-                    available.add(u);
+                    if (u.unitClass != PgDatabase.CLASS_LAND_TRANSPORT
+                            && u.unitClass != PgDatabase.CLASS_AIR_TRANSPORT
+                            && u.unitClass != PgDatabase.CLASS_SEA_TRANSPORT
+                            && u.unitClass != PgDatabase.CLASS_FORT
+                            && !u.isFortification()) {
+                        available.add(u);
+                    }
                 }
             }
         }
