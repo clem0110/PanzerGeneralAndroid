@@ -385,12 +385,36 @@ public class PgMapView extends View {
         }
 
         if (engine.isDeploymentPhase) {
-            PgDatabase.ActiveUnit topOcc = engine.getTopUnitAt(col, row, airModePreferred);
-            if (topOcc == null && engine.isHexValidForCoreDeployment(col, row) && !engine.unplacedCoreUnits.isEmpty()) {
-                if (listener != null) {
-                    listener.onDeployHexTapped(col, row);
+            PgDatabase.ActiveUnit airOcc = engine.getUnitAt(col, row, true);
+            PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(col, row, false);
+            boolean canDeployHere = false;
+            if ((airOcc == null || gndOcc == null) && !engine.unplacedCoreUnits.isEmpty()) {
+                for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
+                    for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
+                        if (h[0] == col && h[1] == row) {
+                            canDeployHere = true;
+                            break;
+                        }
+                    }
+                    if (canDeployHere) break;
                 }
-                return;
+            }
+
+            if (canDeployHere) {
+                // If completely unoccupied hex, tap always opens deployment dialog
+                if (airOcc == null && gndOcc == null) {
+                    if (listener != null) {
+                        listener.onDeployHexTapped(col, row);
+                    }
+                    return;
+                }
+                // If air mode is preferred and air layer is open, tap opens deployment dialog for planes!
+                if (airModePreferred && airOcc == null) {
+                    if (listener != null) {
+                        listener.onDeployHexTapped(col, row);
+                    }
+                    return;
+                }
             }
         }
 
@@ -438,9 +462,42 @@ public class PgMapView extends View {
             }
         }
 
-        // 3. If clicking a unit or hex that is already selected, remove the selection
+        // 3. If clicking a unit or hex that is already selected, handle deploy dialog or switch layer
         if ((selectedUnit != null && selectedUnit.col == col && selectedUnit.row == row)
                 || (selectedUnit == null && selectedCol == col && selectedRow == row)) {
+            if (engine.isDeploymentPhase) {
+                PgDatabase.ActiveUnit airOcc = engine.getUnitAt(col, row, true);
+                PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(col, row, false);
+                boolean canDeployHere = false;
+                if ((airOcc == null || gndOcc == null) && !engine.unplacedCoreUnits.isEmpty()) {
+                    for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
+                        for (int[] h : engine.getValidCoreDeploymentHexes(u)) {
+                            if (h[0] == col && h[1] == row) {
+                                canDeployHere = true;
+                                break;
+                            }
+                        }
+                        if (canDeployHere) break;
+                    }
+                }
+                if (canDeployHere) {
+                    if (listener != null) {
+                        listener.onDeployHexTapped(col, row);
+                    }
+                    return;
+                }
+            }
+
+            // If hex has another friendly unit on opposite layer, toggle selection between them
+            if (selectedUnit != null) {
+                PgDatabase.ActiveUnit otherLayer = engine.getUnitAt(col, row, !engine.isUnitOnAirLayer(selectedUnit));
+                if (otherLayer != null && otherLayer.isAxis) {
+                    sounds.playSelect();
+                    selectUnit(otherLayer);
+                    return;
+                }
+            }
+
             sounds.playClick();
             clearSelection();
             return;

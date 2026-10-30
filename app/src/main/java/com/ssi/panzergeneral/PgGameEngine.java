@@ -419,7 +419,26 @@ public class PgGameEngine {
             }
         }
 
-        // 2. Controlled cities (for ground), controlled airfields (for air), or controlled ports
+        // 2. Allow planes to be deployed on the same hex as other deployed units if they are land units
+        if (isAir) {
+            for (PgDatabase.ActiveUnit other : units) {
+                if (other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
+                    PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
+                            ? db.equipment.get(other.unitDefId) : null;
+                    if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
+                        int c = other.col, r = other.row;
+                        if (c >= 0 && c < scenario.cols && r >= 0 && r < scenario.rows) {
+                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !hasEnemyAdjacentOrOnHex(c, r, true)) {
+                                added[c][r] = true;
+                                res.add(new int[]{c, r});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Controlled cities (for ground), controlled airfields (for air), or controlled ports
         int targetBaseTerrain = isAir ? 6 : 8;
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
@@ -453,7 +472,6 @@ public class PgGameEngine {
     public boolean isHexValidForCoreDeployment(int col, int row) {
         if (!isDeploymentPhase || scenario == null || unplacedCoreUnits.isEmpty()) return false;
         if (col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
-        if (scenario.grid[col][row].isDeployHex) return true;
         for (PgDatabase.ActiveUnit u : unplacedCoreUnits) {
             for (int[] h : getValidCoreDeploymentHexes(u)) {
                 if (h[0] == col && h[1] == row) return true;
@@ -539,10 +557,27 @@ public class PgGameEngine {
             for (int[] d : scenario.deployHexes) {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < scenario.cols && dr >= 0 && dr < scenario.rows) {
-                    boolean allowWater = !isAir;
+                    boolean allowWater = true;
                     if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
+                    }
+                }
+            }
+            if (isAir) {
+                for (PgDatabase.ActiveUnit other : units) {
+                    if (other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
+                        PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
+                                ? db.equipment.get(other.unitDefId) : null;
+                        if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
+                            int c = other.col, r = other.row;
+                            if (c >= 0 && c < scenario.cols && r >= 0 && r < scenario.rows) {
+                                if (!added[c][r] && canDeployAtHex(c, r, true, true) && !hasEnemyAdjacentOrOnHex(c, r, true)) {
+                                    added[c][r] = true;
+                                    res.add(new int[]{c, r});
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -597,7 +632,25 @@ public class PgGameEngine {
         // 1994 Panzer General Rule:
         // - Purchased ground units can only be placed on or adjacent to player-controlled cities (terrainType 8)
         // - Purchased planes can only be placed on or adjacent to player-controlled airports / airfields (terrainType 6)
+        //   or on the same hex as other deployed friendly land units
         // - If an enemy unit is on or next to the city or airport, it is under siege and NO units can be placed there!
+        if (isAir) {
+            for (PgDatabase.ActiveUnit other : units) {
+                if (other.isAxis && other.strength > 0 && !isUnitOnAirLayer(other)) {
+                    PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
+                            ? db.equipment.get(other.unitDefId) : null;
+                    if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
+                        int c = other.col, r = other.row;
+                        if (c >= 0 && c < scenario.cols && r >= 0 && r < scenario.rows) {
+                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !hasEnemyAdjacentOrOnHex(c, r, true)) {
+                                added[c][r] = true;
+                                res.add(new int[]{c, r});
+                            }
+                        }
+                    }
+                }
+            }
+        }
         int targetBaseTerrain = isAir ? 6 : 8;
 
         for (int c = 0; c < scenario.cols; c++) {

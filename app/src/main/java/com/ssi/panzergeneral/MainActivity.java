@@ -1142,6 +1142,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         if (engine.scenario == null || !engine.isDeploymentPhase) return;
         if (targetCol < 0 || targetCol >= engine.scenario.cols || targetRow < 0 || targetRow >= engine.scenario.rows) return;
         PgDatabase.HexCell cell = engine.scenario.grid[targetCol][targetRow];
+        PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(targetCol, targetRow, false);
+        PgDatabase.ActiveUnit airOcc = engine.getUnitAt(targetCol, targetRow, true);
 
         List<PgDatabase.ActiveUnit> eligible = new ArrayList<>();
         for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
@@ -1155,12 +1157,16 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
 
         AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle(String.format(Locale.ROOT, "Deploy Core Unit at (%d, %d) - %s [%s]",
-                targetCol, targetRow, cell.name, cell.getTerrainName()));
+        String title = (gndOcc != null && airOcc == null)
+                ? String.format(Locale.ROOT, "Deploy Plane at (%d, %d) [With %s]", targetCol, targetRow, db.equipment.get(gndOcc.unitDefId).name)
+                : String.format(Locale.ROOT, "Deploy Core Unit at (%d, %d) - %s [%s]", targetCol, targetRow, cell.name, cell.getTerrainName());
+        b.setTitle(title);
 
         if (eligible.isEmpty()) {
             if (engine.unplacedCoreUnits.isEmpty()) {
                 b.setMessage("No reserve core units remaining. All core units have been placed on the battlefield.");
+            } else if (gndOcc != null) {
+                b.setMessage("Position is occupied on ground by " + db.equipment.get(gndOcc.unitDefId).name + ". No reserve air units available to deploy here.");
             } else if (cell.terrainType == 6) {
                 b.setMessage("No reserve air units available to deploy onto this airfield.");
             } else {
@@ -1189,6 +1195,17 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         });
         b.setNegativeButton("Cancel", null);
         b.setNeutralButton("View All Reserves", (d, w) -> showCoreDeploymentDialog());
+        if (gndOcc != null && gndOcc.isCore) {
+            b.setPositiveButton("Return " + db.equipment.get(gndOcc.unitDefId).name + " to Reserves", (d, w) -> {
+                if (engine.undeployCoreUnit(gndOcc)) {
+                    sounds.playSelect();
+                    mapView.selectedUnit = null;
+                    refreshHud();
+                    mapView.invalidate();
+                    Toast.makeText(this, "Returned " + db.equipment.get(gndOcc.unitDefId).name + " to Reserve Pool.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
         b.show();
     }
 
