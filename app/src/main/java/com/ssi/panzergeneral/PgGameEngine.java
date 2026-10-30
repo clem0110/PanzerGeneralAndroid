@@ -2380,20 +2380,70 @@ public class PgGameEngine {
     }
 
     public List<int[]> getAvailableAiDeployHexes() {
+        return getAvailableAiDeployHexes(false);
+    }
+
+    public List<int[]> getAvailableAiDeployHexes(boolean isAir) {
         List<int[]> res = new ArrayList<>();
         if (scenario == null) return res;
+        boolean[][] added = new boolean[scenario.cols][scenario.rows];
+
+        // Any controlled objective or supply point
         for (int c = 0; c < scenario.cols; c++) {
             for (int r = 0; r < scenario.rows; r++) {
                 PgDatabase.HexCell cell = scenario.grid[c][r];
-                if (cell.terrainType == 8 && cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, scenario)) {
-                    if (hasEnemyAdjacentOrOnHex(c, r, false)) continue;
-                    if (getUnitAt(c, r, false) == null) {
-                        res.add(new int[]{c, r});
+                boolean isAiOwned = cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, scenario);
+                if (isAiOwned && (cell.isObjective || cell.isSupplyPoint())) {
+                    // Check if base hex itself is a valid spawn hex
+                    if (isHexValidForAiSpawn(c, r, isAir)) {
+                        if (!added[c][r]) {
+                            added[c][r] = true;
+                            res.add(new int[]{c, r});
+                        }
+                    }
+                    // Also allow adjacent hexes around controlled objectives/supply points
+                    for (int[] nb : getNeighbors(c, r)) {
+                        int nc = nb[0], nr = nb[1];
+                        if (nc >= 0 && nc < scenario.cols && nr >= 0 && nr < scenario.rows) {
+                            PgDatabase.HexCell nbCell = scenario.grid[nc][nr];
+                            boolean nbAiOwned = nbCell.ownerNation == 0 || !db.isAxisNation(nbCell.ownerNation, scenario);
+                            if (nbAiOwned && isHexValidForAiSpawn(nc, nr, isAir)) {
+                                if (!added[nc][nr]) {
+                                    added[nc][nr] = true;
+                                    res.add(new int[]{nc, nr});
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
         return res;
+    }
+
+    public boolean isHexValidForAiSpawn(int col, int row, boolean isAir) {
+        if (scenario == null || col < 0 || col >= scenario.cols || row < 0 || row >= scenario.rows) return false;
+        PgDatabase.HexCell cell = scenario.grid[col][row];
+        if (cell.ownerNation > 0 && db.isAxisNation(cell.ownerNation, scenario)) return false;
+
+        // No enemy (Axis) unit may occupy this hex on either layer
+        PgDatabase.ActiveUnit gOn = getUnitAt(col, row, false);
+        if (gOn != null && gOn.isAxis) return false;
+        PgDatabase.ActiveUnit aOn = getUnitAt(col, row, true);
+        if (aOn != null && aOn.isAxis) return false;
+
+        // Target layer must be free
+        if (getUnitAt(col, row, isAir) != null) return false;
+
+        // Terrain validity
+        if (!isAir) {
+            // Ground units cannot spawn on ocean/water
+            if (cell.terrainType == 2 || cell.isWater()) return false;
+        } else {
+            // Air units can spawn on airfields or objectives/supply points
+            if (cell.terrainType != 6 && !cell.isObjective && !cell.isSupplyPoint()) return false;
+        }
+        return true;
     }
 
     public PgDatabase.ActiveUnit purchaseAiUnit(int unitDefId, int col, int row) {
@@ -2402,11 +2452,15 @@ public class PgGameEngine {
         if (def.isFortification() || def.unitClass == PgDatabase.CLASS_FORT) return null;
         if (alliedPrestige < def.cost) return null;
         if (getUnitAt(col, row, def.isAir()) != null) return null;
+        PgDatabase.ActiveUnit otherLayer = getUnitAt(col, row, !def.isAir());
+        if (otherLayer != null && otherLayer.isAxis) return null;
 
         alliedPrestige -= def.cost;
         int curId = nextInstanceId++;
         int nat = (scenario.alliedNations != null && scenario.alliedNations.length > 0 && scenario.alliedNations[0] > 0)
                 ? scenario.alliedNations[0] : 16;
+        PgDatabase.HexCell cell = scenario.grid[col][row];
+        int baseEnt = (cell.terrainType == 8 ? 2 : (cell.isObjective ? 1 : 0));
         PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
                 .instanceId(curId)
                 .unitDefId(unitDefId)
@@ -2416,7 +2470,7 @@ public class PgGameEngine {
                 .col(col)
                 .row(row)
                 .strength(10)
-                .entrenchment(0)
+                .entrenchment(baseEnt)
                 .experience(0)
                 .fuel(def.maxFuel > 0 ? def.maxFuel : 99)
                 .ammo(def.maxAmmo > 0 ? def.maxAmmo : 99)
@@ -2425,10 +2479,170 @@ public class PgGameEngine {
                 .attacked(false)
                 .facingLeft(true)
                 .customTitle(curId + ". " + def.name)
-                .aiOrder(scenario.grid[col][row].isObjective ? 1 : 0)
+                .aiOrder((cell.isObjective || cell.isSupplyPoint()) && !def.isAir() ? 1 : 0)
                 .build();
         units.add(u);
         return u;
+    }
+
+    public double evaluateAiDeploymentEffectiveness(PgDatabase.UnitDef d, int col, int row,
+            int infCount, int artyCount, int tankCount, int atCount, int aaCount, int airCount) {
+        if (d == null || scenario == null) return -999999.0;
+        PgDatabase.HexCell cell = scenario.grid[col][row];
+
+        double score = 0.0;
+
+        // 1. Base strategic importance of the hex
+        if (cell.isObjective) {
+            score += 150.0; // Objectives are primary victory condition!
+        } else if (cell.isSupplyPoint()) {
+            score += 75.0; // Supply points (cities, airfields, ports)
+        } else {
+            score += 35.0; // Adjacent to objective or supply point
+        }
+
+        // 2. Assess threat level from Axis units
+        int minAxisGroundDist = 999;
+        int minAxisDist = 999;
+        int nearbyAxisTanks = 0;
+        int nearbyAxisInf = 0;
+        int nearbyAxisAir = 0;
+
+        for (PgDatabase.ActiveUnit ax : units) {
+            if (ax.isAxis && ax.strength > 0) {
+                int dist = hexDistance(col, row, ax.col, ax.row);
+                if (dist < minAxisDist) minAxisDist = dist;
+                PgDatabase.UnitDef axDef = db.equipment.get(ax.unitDefId);
+                if (!axDef.isAir() && dist < minAxisGroundDist) {
+                    minAxisGroundDist = dist;
+                }
+                if (dist <= 4) {
+                    if (axDef.isAir()) nearbyAxisAir++;
+                    else if (axDef.unitClass == PgDatabase.CLASS_TANK) nearbyAxisTanks++;
+                    else if (axDef.unitClass == PgDatabase.CLASS_INFANTRY) nearbyAxisInf++;
+                }
+            }
+        }
+
+        // Threat urgency: Higher score for hexes that are actively threatened by enemy
+        if (minAxisGroundDist == 1) {
+            score += 120.0; // Enemy adjacent! Emergency defense!
+        } else if (minAxisGroundDist == 2) {
+            score += 100.0; // Enemy 2 hexes away, will reach next turn!
+        } else if (minAxisGroundDist == 3) {
+            score += 75.0;
+        } else if (minAxisGroundDist == 4) {
+            score += 50.0;
+        } else if (minAxisGroundDist <= 6) {
+            score += 25.0;
+        } else if (minAxisDist > 12) {
+            score -= 60.0; // Too remote to influence current battle
+        }
+
+        // 3. Current occupancy of the hex
+        PgDatabase.ActiveUnit existingGround = getUnitAt(col, row, false);
+
+        // If objective is completely ungarrisoned, emergency priority to put a defender on it!
+        if (cell.isObjective && existingGround == null && !d.isAir()) {
+            score += 100.0;
+        } else if (cell.isSupplyPoint() && existingGround == null && !d.isAir()) {
+            score += 40.0;
+        }
+
+        // 4. Unit class synergy with the location and battlefield role
+        switch (d.unitClass) {
+            case PgDatabase.CLASS_INFANTRY:
+                if (cell.terrainType == 8 || cell.isObjective) {
+                    score += 80.0; // Infantry gets massive close defense in cities/objectives
+                }
+                if (minAxisGroundDist <= 3) {
+                    score += 50.0;
+                }
+                if (infCount < 4) {
+                    score += 40.0;
+                }
+                break;
+
+            case PgDatabase.CLASS_ARTILLERY:
+                boolean adjacentToFriendlyDefender = false;
+                for (int[] nb : getNeighbors(col, row)) {
+                    if (nb[0] >= 0 && nb[0] < scenario.cols && nb[1] >= 0 && nb[1] < scenario.rows) {
+                        PgDatabase.ActiveUnit nbU = getUnitAt(nb[0], nb[1], false);
+                        if (nbU != null && !nbU.isAxis) {
+                            adjacentToFriendlyDefender = true;
+                            if (scenario.grid[nb[0]][nb[1]].isObjective) {
+                                score += 70.0; // Supporting an objective garrison!
+                            }
+                        }
+                    }
+                }
+                if (adjacentToFriendlyDefender) {
+                    score += 50.0;
+                }
+                if (minAxisGroundDist == 1 && !adjacentToFriendlyDefender) {
+                    score -= 40.0; // Don't expose isolated artillery on the frontline
+                }
+                if (artyCount < 3) {
+                    score += 35.0;
+                }
+                break;
+
+            case PgDatabase.CLASS_TANK:
+                if (minAxisGroundDist >= 2 && minAxisGroundDist <= 5) {
+                    score += 60.0; // Ideal counter-attack distance
+                }
+                if (nearbyAxisTanks > 0) {
+                    score += 40.0;
+                }
+                if (cell.terrainType == 0 || cell.terrainType == 5) {
+                    score += 20.0;
+                }
+                if (tankCount < 3) {
+                    score += 30.0;
+                }
+                break;
+
+            case PgDatabase.CLASS_ANTI_TANK:
+                if (nearbyAxisTanks > 0) {
+                    score += 90.0; // Critical counter-armor deployment
+                } else if (minAxisGroundDist <= 4) {
+                    score += 40.0;
+                }
+                if (atCount < 2) {
+                    score += 30.0;
+                }
+                break;
+
+            case PgDatabase.CLASS_AIR_DEFENSE:
+            case PgDatabase.CLASS_ANTI_AIR:
+                if (nearbyAxisAir > 0) {
+                    score += 90.0;
+                }
+                if (cell.isObjective || cell.isSupplyPoint()) {
+                    score += 40.0;
+                }
+                break;
+
+            case PgDatabase.CLASS_FIGHTER:
+                if (nearbyAxisAir > 0) {
+                    score += 80.0;
+                }
+                if (airCount < 2) {
+                    score += 40.0;
+                }
+                break;
+
+            case PgDatabase.CLASS_TAC_BOMBER:
+            case PgDatabase.CLASS_LEVEL_BOMBER:
+                if (minAxisGroundDist >= 2) {
+                    score += 40.0;
+                }
+                break;
+        }
+
+        score += d.cost * 0.1;
+
+        return score;
     }
 
     public boolean takeAiReplacements(PgDatabase.ActiveUnit u) {
@@ -3002,41 +3216,102 @@ public class PgGameEngine {
 
         // =========================================================================
         // PHASE 7: Smart AI Reinforcements / Prestige Spending
+        // Allow multiple purchases per turn as long as AI has prestige, placing units where most effective
         // =========================================================================
-        if (alliedPrestige >= 120 && scenario != null) {
-            List<int[]> deploySpots = getAvailableAiDeployHexes();
-            if (!deploySpots.isEmpty()) {
-                int tankCount = 0, infCount = 0, artyCount = 0;
-                for (PgDatabase.ActiveUnit u : units) {
-                    if (!u.isAxis && u.strength > 0) {
-                        PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
-                        if (d.unitClass == PgDatabase.CLASS_TANK) tankCount++;
-                        else if (d.unitClass == PgDatabase.CLASS_INFANTRY) infCount++;
-                        else if (d.unitClass == PgDatabase.CLASS_ARTILLERY) artyCount++;
-                    }
-                }
-
-                int chosenDefId = -1;
-                int bestFitScore = -999;
-                for (PgDatabase.ActiveUnit u : scenario.initialUnits) {
-                    if (!u.isAxis && u.unitDefId > 0 && u.unitDefId < db.equipment.size()) {
-                        PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
-                        if (!d.isAir() && !d.isNaval() && !d.isFortification() && d.unitClass != PgDatabase.CLASS_FORT && d.unitClass != PgDatabase.CLASS_LAND_TRANSPORT && d.cost <= alliedPrestige) {
-                            int fitScore = d.cost;
-                            if (infCount < 3 && d.unitClass == PgDatabase.CLASS_INFANTRY) fitScore += 50;
-                            if (artyCount < 2 && d.unitClass == PgDatabase.CLASS_ARTILLERY) fitScore += 40;
-                            if (tankCount < 2 && d.unitClass == PgDatabase.CLASS_TANK) fitScore += 30;
-
-                            if (fitScore > bestFitScore) {
-                                bestFitScore = fitScore;
-                                chosenDefId = u.unitDefId;
-                            }
+        if (scenario != null && alliedPrestige >= 50) {
+            List<PgDatabase.UnitDef> candidateDefs = new ArrayList<>();
+            Set<Integer> seenDefIds = new HashSet<>();
+            for (PgDatabase.ActiveUnit initU : scenario.initialUnits) {
+                if (!initU.isAxis && initU.unitDefId > 0 && initU.unitDefId < db.equipment.size()) {
+                    if (seenDefIds.add(initU.unitDefId)) {
+                        PgDatabase.UnitDef d = db.equipment.get(initU.unitDefId);
+                        if (d != null && !d.isNaval() && !d.isFortification()
+                                && d.unitClass != PgDatabase.CLASS_FORT
+                                && d.unitClass != PgDatabase.CLASS_LAND_TRANSPORT) {
+                            candidateDefs.add(d);
                         }
                     }
                 }
-                if (chosenDefId > 0) {
-                    int[] spot = deploySpots.get(0);
-                    purchaseAiUnit(chosenDefId, spot[0], spot[1]);
+            }
+
+            if (candidateDefs.isEmpty()) {
+                for (int i = 1; i < db.equipment.size(); i++) {
+                    PgDatabase.UnitDef d = db.equipment.get(i);
+                    if (d != null && !d.isNaval() && !d.isFortification()
+                            && d.unitClass != PgDatabase.CLASS_FORT
+                            && d.unitClass != PgDatabase.CLASS_LAND_TRANSPORT
+                            && d.cost > 0) {
+                        candidateDefs.add(d);
+                        if (candidateDefs.size() >= 10) break;
+                    }
+                }
+            }
+
+            int tankCount = 0, infCount = 0, artyCount = 0, atCount = 0, aaCount = 0, airCount = 0;
+            for (PgDatabase.ActiveUnit u : units) {
+                if (!u.isAxis && u.strength > 0) {
+                    PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
+                    if (d.unitClass == PgDatabase.CLASS_TANK) tankCount++;
+                    else if (d.unitClass == PgDatabase.CLASS_INFANTRY) infCount++;
+                    else if (d.unitClass == PgDatabase.CLASS_ARTILLERY) artyCount++;
+                    else if (d.unitClass == PgDatabase.CLASS_ANTI_TANK) atCount++;
+                    else if (d.unitClass == PgDatabase.CLASS_AIR_DEFENSE || d.unitClass == PgDatabase.CLASS_ANTI_AIR) aaCount++;
+                    else if (d.isAir()) airCount++;
+                }
+            }
+
+            int maxPurchasesThisTurn = 15;
+            int purchasesDone = 0;
+
+            while (purchasesDone < maxPurchasesThisTurn) {
+                int minAffordableCost = Integer.MAX_VALUE;
+                for (PgDatabase.UnitDef d : candidateDefs) {
+                    if (d.cost <= alliedPrestige && d.cost < minAffordableCost) {
+                        minAffordableCost = d.cost;
+                    }
+                }
+                if (minAffordableCost > alliedPrestige) {
+                    break;
+                }
+
+                PgDatabase.UnitDef bestDef = null;
+                int[] bestSpot = null;
+                double bestEffectivenessScore = -999999.0;
+
+                List<int[]> groundSpots = getAvailableAiDeployHexes(false);
+                List<int[]> airSpots = getAvailableAiDeployHexes(true);
+
+                for (PgDatabase.UnitDef d : candidateDefs) {
+                    if (d.cost > alliedPrestige) continue;
+                    List<int[]> spots = d.isAir() ? airSpots : groundSpots;
+                    if (spots.isEmpty()) continue;
+
+                    for (int[] spot : spots) {
+                        double score = evaluateAiDeploymentEffectiveness(d, spot[0], spot[1],
+                                infCount, artyCount, tankCount, atCount, aaCount, airCount);
+                        if (score > bestEffectivenessScore) {
+                            bestEffectivenessScore = score;
+                            bestDef = d;
+                            bestSpot = spot;
+                        }
+                    }
+                }
+
+                if (bestDef != null && bestSpot != null && bestEffectivenessScore > -500.0) {
+                    PgDatabase.ActiveUnit spawned = purchaseAiUnit(bestDef.id, bestSpot[0], bestSpot[1]);
+                    if (spawned != null) {
+                        purchasesDone++;
+                        if (bestDef.unitClass == PgDatabase.CLASS_TANK) tankCount++;
+                        else if (bestDef.unitClass == PgDatabase.CLASS_INFANTRY) infCount++;
+                        else if (bestDef.unitClass == PgDatabase.CLASS_ARTILLERY) artyCount++;
+                        else if (bestDef.unitClass == PgDatabase.CLASS_ANTI_TANK) atCount++;
+                        else if (bestDef.unitClass == PgDatabase.CLASS_AIR_DEFENSE || bestDef.unitClass == PgDatabase.CLASS_ANTI_AIR) aaCount++;
+                        else if (bestDef.isAir()) airCount++;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
                 }
             }
         }
