@@ -61,6 +61,7 @@ public class PgMapView extends View {
     private int animFrame = -1;
     private long animLastTick = 0;
     private PgGameEngine.CombatReport lastCombatBanner = null;
+    public PgDatabase.ActiveUnit ghostDefender = null;
     private long bannerExpireTime = 0;
 
     // Turn banner state
@@ -318,6 +319,56 @@ public class PgMapView extends View {
         invalidate();
     }
 
+    public void playCombatSequence(final PgDatabase.ActiveUnit attacker, final PgDatabase.ActiveUnit target, final PgGameEngine.CombatReport rep) {
+        if (rep == null) return;
+
+        if (rep.supportReport != null) {
+            // Step 1: Show artillery support fire on attacker's hex first!
+            this.ghostDefender = rep.defenderDestroyed ? target : null;
+            PgDatabase.UnitDef sDef = rep.supportUnit != null ? engine.getEffectiveUnitDef(rep.supportUnit) : null;
+            sounds.playCombatSound(sDef);
+            triggerExplosion(rep.supportReport.targetCol, rep.supportReport.targetRow, rep.supportReport);
+            invalidate();
+
+            if (listener != null) {
+                listener.onCombatInitiated(attacker, target, rep);
+            }
+
+            postDelayed(() -> {
+                this.ghostDefender = null;
+                if (rep.attackerDestroyed) {
+                    clearSelection();
+                    invalidate();
+                } else {
+                    // Step 2: Show main combat attack on defender's hex!
+                    PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(attacker);
+                    sounds.playCombatSound(aDef);
+                    triggerExplosion(rep.targetCol, rep.targetRow, rep);
+                    if (attacker.strength > 0) {
+                        selectUnit(attacker);
+                    } else {
+                        clearSelection();
+                    }
+                    invalidate();
+                }
+            }, 850);
+        } else {
+            // Standard single combat without artillery support
+            PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(attacker);
+            sounds.playCombatSound(aDef);
+            triggerExplosion(target.col, target.row, rep);
+            if (attacker.strength > 0) {
+                selectUnit(attacker);
+            } else {
+                clearSelection();
+            }
+            if (listener != null) {
+                listener.onCombatInitiated(attacker, target, rep);
+            }
+            invalidate();
+        }
+    }
+
     private void clampPan() {
         if (engine.scenario == null) return;
         float mapW = (engine.scenario.cols * COL_STEP + 30f) * scale;
@@ -428,18 +479,8 @@ public class PgMapView extends View {
         if (selectedUnit != null && selectedUnit.isAxis && engine.isPlayerTurn) {
             for (PgDatabase.ActiveUnit target : validTargets) {
                 if (target.col == col && target.row == row) {
-                    PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(selectedUnit);
-                    sounds.playCombatSound(aDef);
                     PgGameEngine.CombatReport rep = engine.executeCombat(selectedUnit, target);
-                    triggerExplosion(col, row, rep);
-                    if (selectedUnit.strength > 0) {
-                        selectUnit(selectedUnit);
-                    } else {
-                        clearSelection();
-                    }
-                    if (listener != null) {
-                        listener.onCombatInitiated(selectedUnit, target, rep);
-                    }
+                    playCombatSequence(selectedUnit, target, rep);
                     return;
                 }
             }
@@ -728,6 +769,13 @@ public class PgMapView extends View {
 
                 PgDatabase.ActiveUnit groundUnit = engine.getUnitAt(c, r, false);
                 PgDatabase.ActiveUnit airUnit = engine.getUnitAt(c, r, true);
+                if (ghostDefender != null && ghostDefender.col == c && ghostDefender.row == r) {
+                    if (engine.isUnitOnAirLayer(ghostDefender)) {
+                        if (airUnit == null) airUnit = ghostDefender;
+                    } else {
+                        if (groundUnit == null) groundUnit = ghostDefender;
+                    }
+                }
                 if (groundUnit != null && !engine.isUnitVisibleToPlayer(groundUnit)) groundUnit = null;
                 if (airUnit != null && !engine.isUnitVisibleToPlayer(airUnit)) airUnit = null;
 
@@ -852,6 +900,16 @@ public class PgMapView extends View {
             }
         }
 
+        // Suppression badge
+        if (u.suppression > 0) {
+            badgePaint.setColor(0xDDE53935);
+            RectF sRect = new RectF(x + 3f, y + 37f, x + 18f, y + 49f);
+            canvas.drawRoundRect(sRect, 3f, 3f, badgePaint);
+            textPaint.setColor(Color.WHITE);
+            textPaint.setTextSize(8.5f);
+            canvas.drawText("S" + Math.min(99, u.suppression), x + 10.5f, y + 46.5f, textPaint);
+        }
+
         // Action readiness dot for Axis player units
         if (u.isAxis && engine.isPlayerTurn && (!u.moved || !u.attacked)) {
             badgePaint.setColor(!u.moved ? 0xFF00E676 : 0xFFFFC400);
@@ -868,6 +926,26 @@ public class PgMapView extends View {
         badgePaint.setColor(0xE61C221E);
         RectF r = new RectF(bx, by, bx + bw, by + bh);
         canvas.drawRoundRect(r, 12f, 12f, badgePaint);
+
+        if (rep.isDefensiveSupport) {
+            hexStrokePaint.setColor(0xFFFFB300);
+            hexStrokePaint.setStrokeWidth(2.4f);
+            canvas.drawRoundRect(r, 12f, 12f, hexStrokePaint);
+
+            textPaint.setColor(0xFFFFD54F);
+            textPaint.setTextSize(20.5f);
+            String headline = "ARTILLERY DEFENSIVE FIRE! " + rep.attackerName + " ➔ " + rep.defenderName;
+            canvas.drawText(headline, bx + bw * 0.5f, by + 28f, textPaint);
+
+            textPaint.setColor(Color.WHITE);
+            textPaint.setTextSize(17.5f);
+            String detail = String.format(Locale.ROOT, "Incoming Attacker: -%d%s   |   %d Pts Suppressed",
+                    rep.defenderLosses, rep.defenderDestroyed ? " (DESTROYED!)" : "",
+                    rep.defenderSuppressed);
+            canvas.drawText(detail, bx + bw * 0.5f, by + 57f, textPaint);
+            return;
+        }
+
         hexStrokePaint.setColor(rep.overrun ? 0xFF00E676 : (rep.ruggedDefense || rep.surpriseContact ? 0xFFFF5252 : 0xFFC5A059));
         hexStrokePaint.setStrokeWidth(2.2f);
         canvas.drawRoundRect(r, 12f, 12f, hexStrokePaint);
@@ -887,7 +965,12 @@ public class PgMapView extends View {
         else if (rep.defenderSurrendered) extra += " [SURRENDERED!]";
         else if (rep.defenderRetreated) extra += " [RETREATED]";
         if (rep.interceptorUnit != null) extra += " [INTERCEPTED]";
-        else if (rep.supportUnit != null) extra += " [ARTY SUPPORT]";
+        else if (rep.supportReport != null) {
+            extra += String.format(Locale.ROOT, " [ARTY SUP: -%d / %d SUPP]",
+                    rep.supportReport.defenderLosses, rep.supportReport.defenderSuppressed);
+        } else if (rep.supportUnit != null) {
+            extra += " [ARTY SUPPORT]";
+        }
         String detail = String.format(Locale.ROOT, "Attacker: -%d%s   |   Defender: -%d%s%s",
                 rep.attackerLosses, rep.attackerDestroyed ? " (DESTROYED)" : "",
                 rep.defenderLosses, rep.defenderDestroyed && !rep.defenderSurrendered ? " (DESTROYED)" : "",

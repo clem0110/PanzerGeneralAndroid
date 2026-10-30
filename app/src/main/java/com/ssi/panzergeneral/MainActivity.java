@@ -1320,19 +1320,42 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
                         if (tVis || involvesAxis) {
                             if (!isFinishing() && !isDestroyed()) {
-                                runOnUiThread(() -> {
-                                    mapView.centerOnHex(report.targetCol, report.targetRow);
-                                    mapView.selectUnit(attacker);
-                                    PgDatabase.UnitDef aDef = attacker != null ? db.equipment.get(attacker.unitDefId) : null;
-                                    sounds.playCombatSound(aDef);
-                                    mapView.triggerExplosion(report.targetCol, report.targetRow, report);
-                                    refreshHud();
-                                    mapView.invalidate();
-                                });
+                                if (report.supportReport != null) {
+                                    // Step 1: Show defensive artillery fire on attacker first
+                                    runOnUiThread(() -> {
+                                        mapView.centerOnHex(report.supportReport.targetCol, report.supportReport.targetRow);
+                                        if (report.supportReport.supportUnit != null) {
+                                            mapView.selectUnit(report.supportReport.supportUnit);
+                                        }
+                                        PgDatabase.UnitDef sDef = report.supportReport.supportUnit != null ? db.equipment.get(report.supportReport.supportUnit.unitDefId) : null;
+                                        sounds.playCombatSound(sDef);
+                                        mapView.triggerExplosion(report.supportReport.targetCol, report.supportReport.targetRow, report.supportReport);
+                                        refreshHud();
+                                        mapView.invalidate();
+                                    });
+                                    try {
+                                        Thread.sleep(850);
+                                    } catch (InterruptedException ignored) {}
+                                }
+
+                                if (!report.attackerDestroyed || report.supportReport == null) {
+                                    // Step 2: Show main combat attack on defender
+                                    runOnUiThread(() -> {
+                                        mapView.centerOnHex(report.targetCol, report.targetRow);
+                                        if (attacker != null) {
+                                            mapView.selectUnit(attacker);
+                                        }
+                                        PgDatabase.UnitDef aDef = attacker != null ? db.equipment.get(attacker.unitDefId) : null;
+                                        sounds.playCombatSound(aDef);
+                                        mapView.triggerExplosion(report.targetCol, report.targetRow, report);
+                                        refreshHud();
+                                        mapView.invalidate();
+                                    });
+                                    try {
+                                        Thread.sleep(850);
+                                    } catch (InterruptedException ignored) {}
+                                }
                             }
-                            try {
-                                Thread.sleep(850);
-                            } catch (InterruptedException ignored) {}
                         }
                     }
                 });

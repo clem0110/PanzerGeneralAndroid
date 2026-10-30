@@ -48,6 +48,8 @@ public class PgGameEngine {
         public PgDatabase.ActiveUnit supportUnit;
         public PgDatabase.ActiveUnit interceptorUnit;
         public int targetCol, targetRow;
+        public boolean isDefensiveSupport;
+        public CombatReport supportReport;
     }
 
     @Data
@@ -1623,10 +1625,28 @@ public class PgGameEngine {
             expDefLosses *= evadeFactor;
         }
 
+        PgDatabase.ActiveUnit support = findDefensiveSupport(attacker, defender);
+        boolean artillerySupport = (support != null && dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender));
+        boolean fighterInterceptor = (findAirInterceptorOrFlak(attacker, defender) != null);
+
+        if (artillerySupport) {
+            PgDatabase.UnitDef sDef = getEffectiveUnitDef(support);
+            int distToAtk = hexDistance(support.col, support.row, attacker.col, attacker.row);
+            int sAtkGrade = getStrategyGuideAttackGrade(support, sDef, attacker, aDef, distToAtk, false);
+            int aDefGrade = getStrategyGuideDefenseGrade(support, sDef, attacker, aDef, distToAtk, false);
+            int sEffDiff = calculateEffectiveDifference(sAtkGrade, aDefGrade);
+            int sStr = getEffectiveFiringStrength(support, sDef, true);
+            double sPHit = (sAtkGrade > 0) ? getD20HitProbability(sEffDiff, true) : 0.0;
+            double sPSupp = (sAtkGrade > 0) ? getD20SuppProbability(sEffDiff, true) : 0.0;
+            double expArtKills = Math.min(attacker.strength, sStr * sPHit);
+            double expArtSupp = Math.min(attacker.strength - expArtKills, sStr * sPSupp);
+            expAtkLosses += expArtKills;
+            atkStr = (int) Math.max(0, atkStr - expArtKills - expArtSupp);
+            expDefLosses = (atkAttackGrade > 0) ? Math.min(defender.strength, atkStr * atkPHit) : 0.0;
+        }
+
         int expectedDefenderLosses = (int) Math.round(expDefLosses);
         int expectedAttackerLosses = (int) Math.round(expAtkLosses);
-        boolean artillerySupport = (findDefensiveSupport(attacker, defender) != null);
-        boolean fighterInterceptor = (findAirInterceptorOrFlak(attacker, defender) != null);
         String summary = String.format(Locale.ROOT, "Expected: Atk -%d vs Def -%d (Ini %d:%d)%s%s",
                 expectedAttackerLosses, expectedDefenderLosses,
                 aIni, dIni,
@@ -1690,14 +1710,21 @@ public class PgGameEngine {
         }
 
         // 2. Check Defensive Artillery Support against ground close assault
-        PgDatabase.ActiveUnit support = findDefensiveSupport(attacker, defender);
-        if (support != null && dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender)) {
-            rep.supportUnit = support;
-            if (supplyEnabled) {
-                support.ammo = Math.max(0, support.ammo - 1);
+        if (!surpriseAmbush) {
+            PgDatabase.ActiveUnit support = findDefensiveSupport(attacker, defender);
+            if (support != null && dist == 1 && !isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender)) {
+                rep.supportUnit = support;
+                CombatReport sRep = resolveDefensiveSupportFire(support, attacker, defender);
+                rep.supportReport = sRep;
+                if (sRep != null) {
+                    rep.attackerLosses += sRep.defenderLosses;
+                    if (sRep.defenderDestroyed) {
+                        rep.attackerDestroyed = true;
+                        attacker.attacked = true;
+                        return rep;
+                    }
+                }
             }
-            int supHits = 1 + rng.nextInt(2);
-            attacker.suppression = Math.min(attacker.strength, attacker.suppression + supHits);
         }
 
         // 3. Stiff Defense (Rugged Defense) Chance (Chapter 5)
@@ -1994,19 +2021,88 @@ public class PgGameEngine {
         return null;
     }
 
-    private PgDatabase.ActiveUnit findDefensiveSupport(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
+    public PgDatabase.ActiveUnit findDefensiveSupport(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
+        if (attacker == null || defender == null) return null;
         if (!isUnitOnAirLayer(attacker) && !isUnitOnAirLayer(defender)) {
+            PgDatabase.ActiveUnit bestSupport = null;
+            int bestStr = -1;
             for (int[] nb : getNeighbors(defender.col, defender.row)) {
                 PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
                 if (adj != null && adj.isAxis == defender.isAxis && (!supplyEnabled || adj.ammo > 0) && adj.strength > 0) {
                     PgDatabase.UnitDef adjDef = getEffectiveUnitDef(adj);
-                    if (adjDef.unitClass == PgDatabase.CLASS_ARTILLERY && adjDef.range >= 2) {
-                        return adj;
+                    if (adjDef != null && (adjDef.unitClass == PgDatabase.CLASS_ARTILLERY || adjDef.isNaval()) && adjDef.range >= 2) {
+                        int distToAtk = hexDistance(adj.col, adj.row, attacker.col, attacker.row);
+                        if (distToAtk <= adjDef.range) {
+                            int firingStr = getEffectiveFiringStrength(adj, adjDef, true);
+                            if (firingStr > bestStr) {
+                                bestStr = firingStr;
+                                bestSupport = adj;
+                            }
+                        }
                     }
                 }
             }
+            if (bestStr > 0) return bestSupport;
         }
         return null;
+    }
+
+    public CombatReport resolveDefensiveSupportFire(PgDatabase.ActiveUnit support, PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender) {
+        if (support == null || attacker == null) return null;
+        PgDatabase.UnitDef sDef = getEffectiveUnitDef(support);
+        PgDatabase.UnitDef aDef = getEffectiveUnitDef(attacker);
+        if (sDef == null || aDef == null) return null;
+
+        if (supplyEnabled && sDef.maxAmmo > 0) {
+            support.ammo = Math.max(0, support.ammo - 1);
+        }
+
+        int distToAttacker = hexDistance(support.col, support.row, attacker.col, attacker.row);
+        int sAtkGrade = getStrategyGuideAttackGrade(support, sDef, attacker, aDef, distToAttacker, false);
+        int aDefGrade = getStrategyGuideDefenseGrade(support, sDef, attacker, aDef, distToAttacker, false);
+        int sEffDiff = calculateEffectiveDifference(sAtkGrade, aDefGrade);
+        int sStr = getEffectiveFiringStrength(support, sDef, true);
+
+        int sKills = 0;
+        int sSupp = 0;
+        if (sStr > 0 && sAtkGrade > 0) {
+            int[] sRes = resolveD20Fire(sStr, sEffDiff, true);
+            sKills = Math.min(attacker.strength, sRes[0]);
+            sSupp = Math.min(attacker.strength - sKills, sRes[1]);
+        }
+
+        int startStr = attacker.strength;
+        attacker.strength = Math.max(0, attacker.strength - sKills);
+        attacker.suppression = Math.min(attacker.strength, attacker.suppression + sSupp);
+        support.experience = Math.min(500, support.experience + sKills * 12 + 5);
+
+        boolean attackerKilled = (attacker.strength <= 0);
+        if (attackerKilled) {
+            units.remove(attacker);
+            int atkBasePrestige = Math.max(1, aDef.cost / 10);
+            int atkFullReward = (atkBasePrestige * (attacker.getStars() + 1)) / 2;
+            if (support.isAxis) axisPrestige += atkFullReward;
+            else alliedPrestige += atkFullReward;
+        }
+
+        return CombatReport.builder()
+                .attackerName(sDef.name)
+                .defenderName(aDef.name)
+                .attackerId(support.instanceId)
+                .defenderId(attacker.instanceId)
+                .attackerIconId(getEffectiveIconId(support))
+                .defenderIconId(getEffectiveIconId(attacker))
+                .attackerStartStr(support.strength)
+                .defenderStartStr(startStr)
+                .attackerLosses(0)
+                .defenderLosses(sKills)
+                .defenderSuppressed(sSupp)
+                .defenderDestroyed(attackerKilled)
+                .targetCol(attacker.col)
+                .targetRow(attacker.row)
+                .supportUnit(support)
+                .isDefensiveSupport(true)
+                .build();
     }
 
     public boolean resupplyUnit(PgDatabase.ActiveUnit u) {
