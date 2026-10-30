@@ -788,13 +788,27 @@ public class PgCombatSystem {
 
             // Panzer General Tank Overrun Rule:
             // If a Tank destroys a weak ground defender in close combat with 0 total attacker losses, it OVERRUNS!
-            if (dist == 1 && aDef.unitClass == PgDatabase.CLASS_TANK && !engine.isUnitOnAirLayer(defender)
+            if (!surpriseAmbush && dist == 1 && aDef.unitClass == PgDatabase.CLASS_TANK && !engine.isUnitOnAirLayer(defender)
                     && rep.attackerLosses == 0 && !rep.attackerDestroyed && rep.defenderStartStr <= 6
                     && engine.movementSystem.getUnitStepMoveCost(attacker, aDef, engine.scenario.grid[defOrigCol][defOrigRow]) < 99) {
                 rep.overrun = true;
-                attacker.col = defOrigCol;
-                attacker.row = defOrigRow;
-                engine.onHexCaptured(defOrigCol, defOrigRow, attacker);
+                if (!engine.supplyEnabled || aDef.maxAmmo <= 0 || attacker.ammo > 0) {
+                    attacker.attacked = false; // Tank retains its attack after an overrun!
+                }
+                if (attacker.isAxis && engine.isPlayerTurn) {
+                    // Player Tank Overrun: keep tank on its current hex so the player can choose whether and where to move
+                    attacker.moved = false;
+                    int maxMp = engine.getMaxMovementPoints(attacker);
+                    attacker.movePointsUsed = Math.max(1, attacker.movePointsUsed);
+                    if (maxMp > 1 && attacker.movePointsUsed >= maxMp) {
+                        attacker.movePointsUsed = maxMp - 1;
+                    }
+                } else {
+                    // AI Tank Overrun: automatically advance into the vacated hex
+                    attacker.col = defOrigCol;
+                    attacker.row = defOrigRow;
+                    engine.onHexCaptured(defOrigCol, defOrigRow, attacker);
+                }
             } else if (!attacker.isAxis && dist == 1 && !aDef.isAir() && !dDef.isAir() && !rep.attackerDestroyed
                     && engine.movementSystem.getTerrainMoveCost(aDef, engine.scenario.grid[defOrigCol][defOrigRow], false) < 99) {
                 // AI automatically advances into vacated hex on close assault

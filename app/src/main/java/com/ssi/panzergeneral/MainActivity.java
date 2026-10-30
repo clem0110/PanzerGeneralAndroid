@@ -407,6 +407,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         btnSupply = createCompactButton("SUPPLY", 0xFF2E5A36);
         btnSupply.setOnClickListener(v -> {
+            if (mapView.pendingOverrunUnit != null) {
+                sounds.playClick();
+                mapView.cancelOverrunMoveSelection();
+                refreshHud();
+                Toast.makeText(this, "Holding current position.", Toast.LENGTH_SHORT).show();
+                return;
+            }
             if (engine.isDeploymentPhase && mapView.selectedUnit != null && mapView.selectedUnit.isAxis && mapView.selectedUnit.isCore) {
                 PgDatabase.ActiveUnit u = mapView.selectedUnit;
                 if (engine.undeployCoreUnit(u)) {
@@ -691,6 +698,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             else if (u.transportDefId > 0) {
                 trpTag = " • Trp: " + db.equipment.get(u.transportDefId).name + (u.mountedInTransport ? " (Mounted)" : "");
             }
+            if (mapView.pendingOverrunUnit != null && mapView.pendingOverrunUnit == u) {
+                trpTag += " • [OVERRUN: TAP HEX TO MOVE]";
+            }
             int maxStr = u.getMaxOverstrength();
             tvSelectedTitle.setText(String.format(Locale.ROOT, "%s %s  |  Str: %d/%d (Sup:%d)  |  Exp: %d (%d★)  |  Ent: %d%s",
                     sideTag, def.name, u.strength, maxStr, u.suppression, u.experience, u.getStars(), u.entrenchment, trpTag));
@@ -725,6 +735,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 btnElite.setEnabled(engine.canReinforceUnit(u, true));
                 btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
                 btnUpgrade.setEnabled(engine.canUpgradeUnit(u));
+                btnMount.setEnabled(false);
+            } else if (mapView.pendingOverrunUnit != null && mapView.pendingOverrunUnit == u) {
+                btnSupply.setText("STAY HERE");
+                btnSupply.setBackgroundColor(0xFF546E7A);
+                btnSupply.setEnabled(true);
+                btnReinforce.setEnabled(false);
+                btnElite.setEnabled(false);
+                btnUpgrade.setEnabled(false);
                 btnMount.setEnabled(false);
             } else {
                 btnSupply.setText("SUPPLY");
@@ -793,6 +811,49 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     public void onCombatInitiated(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, PgGameEngine.CombatReport report) {
         refreshHud();
         checkScenarioCompletion();
+    }
+
+    @Override
+    public void onOverrunMoveOption(PgDatabase.ActiveUnit attacker, PgGameEngine.CombatReport report) {
+        if (isFinishing() || isDestroyed() || isAiTurnRunning || engine.scenario == null
+                || !engine.isPlayerTurn || engine.scenarioOutcome != 0
+                || attacker == null || attacker.strength <= 0 || !engine.units.contains(attacker)) {
+            return;
+        }
+
+        Map<Integer, Integer> reach = engine.getReachableHexes(attacker);
+        if (reach.size() <= 1) {
+            attacker.moved = true;
+            mapView.selectUnit(attacker);
+            refreshHud();
+            return;
+        }
+
+        PgDatabase.UnitDef def = db.equipment.get(attacker.unitDefId);
+        String tankName = (attacker.customTitle != null && !attacker.customTitle.isEmpty())
+                ? attacker.customTitle : (def != null ? def.name : "Tank");
+        String defName = (report != null && report.defenderName != null) ? report.defenderName : "enemy unit";
+        int remMp = engine.getRemainingMovementPoints(attacker);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Tank Overrun!")
+                .setMessage(String.format(Locale.ROOT,
+                        "%s overran %s with 0 losses and retains its attack!\n\nWould you like to move %s (%d MP available)?",
+                        tankName, defName, tankName, remMp))
+                .setCancelable(false)
+                .setPositiveButton("Move (Select Hex)", (d, w) -> {
+                    sounds.playSelect();
+                    mapView.startOverrunMoveSelection(attacker);
+                    refreshHud();
+                })
+                .setNegativeButton("Stay Here", (d, w) -> {
+                    sounds.playClick();
+                    attacker.moved = true;
+                    mapView.pendingOverrunUnit = null;
+                    mapView.selectUnit(attacker);
+                    refreshHud();
+                })
+                .show();
     }
 
     @Override
@@ -1258,6 +1319,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
     private void selectNextUnmovedUnit() {
         if (engine.units.isEmpty() || !engine.isPlayerTurn) return;
+        if (mapView.pendingOverrunUnit != null) {
+            mapView.cancelOverrunMoveSelection();
+        }
         int startIdx = 0;
         if (mapView.selectedUnit != null) {
             int idx = engine.units.indexOf(mapView.selectedUnit);
@@ -1280,6 +1344,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
     private void performEndTurn() {
         if (isAiTurnRunning) return;
+        if (mapView.pendingOverrunUnit != null) {
+            mapView.cancelOverrunMoveSelection();
+        }
         mapView.purchasePlacementMode = false;
         mapView.clearSelection();
         isAiTurnRunning = true;
@@ -1613,6 +1680,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
     private void showRequisitionDialog() {
         if (engine.scenario == null) return;
+        if (mapView.pendingOverrunUnit != null) {
+            mapView.cancelOverrunMoveSelection();
+            refreshHud();
+        }
 
         final android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -2844,7 +2915,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 "• Close Terrain caps non-infantry Initiative: Cities & Fortifications cap Initiative at 1; Forests, Mountains, Swamps & Bocage cap at 2; Rough caps at 3. Infantry gains +2 Initiative in close terrain.\n" +
                 "• Each point of Initiative advantage grants 20% First Strike fire before the enemy can shoot back.\n\n" +
                 "3. SPECIAL UNIT ABILITIES\n" +
-                "• TANK OVERRUN: When a Tank destroys a weakened enemy ground unit in close combat with 0 losses to the Tank, it triggers an OVERRUN — advancing into the hex and retaining its attack to strike again!\n" +
+                "• TANK OVERRUN: When a Tank destroys a weakened enemy ground unit in close combat with 0 losses to the Tank, it triggers an OVERRUN — letting you choose whether and where to move while retaining its attack to strike again!\n" +
                 "• RUGGED DEFENSE & PIONIERE: Entrenched defenders can trigger Rugged Defense, inflicting heavy casualties. Pioneer / Engineer units ignore enemy Rugged Defense and strip 2x entrenchment.\n" +
                 "• BRIDGE ENGINEERS: A Bridge Engineer standing on a River hex forms a Pontoon Bridge — friendly units cross for 1 MP and suffer no river combat penalties.\n" +
                 "• DEFENSIVE ARTILLERY & FIGHTER INTERCEPTORS: Friendly Artillery (range ≥ 2) automatically fires defensive support when an adjacent friendly ground unit is assaulted. Friendly Fighters automatically intercept enemy air attacks on adjacent hexes.\n" +

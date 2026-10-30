@@ -16,6 +16,7 @@ public class PgMapView extends View {
         void onPurchasePlacementRequested(int col, int row);
         void onCoreUnitDeployRequested(PgDatabase.ActiveUnit unit, int col, int row);
         void onDeployHexTapped(int col, int row);
+        void onOverrunMoveOption(PgDatabase.ActiveUnit attacker, PgGameEngine.CombatReport report);
     }
 
     // Original Panzer General TACMAP.SHP sprite dimensions: 60x50
@@ -49,6 +50,8 @@ public class PgMapView extends View {
     public int pendingPurchaseUnitId = -1;
     public int pendingPurchaseTransportId = 0;
     public PgDatabase.ActiveUnit pendingDeployCoreUnit = null;
+    public PgDatabase.ActiveUnit pendingOverrunUnit = null;
+    private boolean awaitingOverrunPrompt = false;
 
     public int selectedCol = -1;
     public int selectedRow = -1;
@@ -275,6 +278,8 @@ public class PgMapView extends View {
     }
 
     public void clearSelection() {
+        pendingOverrunUnit = null;
+        awaitingOverrunPrompt = false;
         selectedCol = -1;
         selectedRow = -1;
         selectedUnit = null;
@@ -307,6 +312,38 @@ public class PgMapView extends View {
             listener.onHexSelected(u.col, u.row, cell, u);
         }
         invalidate();
+    }
+
+    public void startOverrunMoveSelection(PgDatabase.ActiveUnit u) {
+        if (u == null || u.strength <= 0 || !engine.units.contains(u)) {
+            pendingOverrunUnit = null;
+            clearSelection();
+            return;
+        }
+        pendingOverrunUnit = u;
+        selectedCol = u.col;
+        selectedRow = u.row;
+        selectedUnit = u;
+        reachableHexes = engine.getReachableHexes(u);
+        validTargets.clear();
+        bannerExpireTime = 0;
+        if (listener != null && engine.scenario != null) {
+            PgDatabase.HexCell cell = (u.col >= 0 && u.col < engine.scenario.cols && u.row >= 0 && u.row < engine.scenario.rows)
+                    ? engine.scenario.grid[u.col][u.row] : null;
+            listener.onHexSelected(u.col, u.row, cell, u);
+        }
+        invalidate();
+    }
+
+    public void cancelOverrunMoveSelection() {
+        PgDatabase.ActiveUnit u = pendingOverrunUnit;
+        pendingOverrunUnit = null;
+        if (u != null && u.strength > 0 && engine.units.contains(u)) {
+            u.moved = true;
+            selectUnit(u);
+        } else {
+            clearSelection();
+        }
     }
 
     public void triggerExplosion(int col, int row, PgGameEngine.CombatReport rep) {
@@ -345,7 +382,22 @@ public class PgMapView extends View {
                     sounds.playCombatSound(aDef);
                     triggerExplosion(rep.targetCol, rep.targetRow, rep);
                     if (attacker != null && attacker.strength > 0) {
-                        selectUnit(attacker);
+                        if (rep.overrun && attacker.isAxis && engine.isPlayerTurn) {
+                            awaitingOverrunPrompt = true;
+                            selectedCol = attacker.col;
+                            selectedRow = attacker.row;
+                            selectedUnit = attacker;
+                            reachableHexes.clear();
+                            validTargets.clear();
+                            postDelayed(() -> {
+                                awaitingOverrunPrompt = false;
+                                if (listener != null) {
+                                    listener.onOverrunMoveOption(attacker, rep);
+                                }
+                            }, 500);
+                        } else {
+                            selectUnit(attacker);
+                        }
                     } else {
                         clearSelection();
                     }
@@ -356,9 +408,24 @@ public class PgMapView extends View {
             // Standard single combat without artillery support
             PgDatabase.UnitDef aDef = engine.getEffectiveUnitDef(attacker);
             sounds.playCombatSound(aDef);
-            triggerExplosion(target.col, target.row, rep);
+            triggerExplosion(rep.targetCol, rep.targetRow, rep);
             if (attacker != null && attacker.strength > 0) {
-                selectUnit(attacker);
+                if (rep.overrun && attacker.isAxis && engine.isPlayerTurn) {
+                    awaitingOverrunPrompt = true;
+                    selectedCol = attacker.col;
+                    selectedRow = attacker.row;
+                    selectedUnit = attacker;
+                    reachableHexes.clear();
+                    validTargets.clear();
+                    postDelayed(() -> {
+                        awaitingOverrunPrompt = false;
+                        if (listener != null) {
+                            listener.onOverrunMoveOption(attacker, rep);
+                        }
+                    }, 500);
+                } else {
+                    selectUnit(attacker);
+                }
             } else {
                 clearSelection();
             }
@@ -391,6 +458,7 @@ public class PgMapView extends View {
     private void handleTap(float screenX, float screenY) {
         if (engine.scenario == null) return;
         if (!engine.isPlayerTurn) return;
+        if (awaitingOverrunPrompt) return;
 
         if (turnBannerTitle != null && System.currentTimeMillis() < turnBannerExpireTime) {
             turnBannerExpireTime = 0;
@@ -435,6 +503,43 @@ public class PgMapView extends View {
                 listener.onCoreUnitDeployRequested(pendingDeployCoreUnit, col, row);
             }
             return;
+        }
+
+        if (pendingOverrunUnit != null) {
+            if (!engine.units.contains(pendingOverrunUnit) || pendingOverrunUnit.strength <= 0) {
+                pendingOverrunUnit = null;
+            } else if (col == pendingOverrunUnit.col && row == pendingOverrunUnit.row) {
+                sounds.playClick();
+                cancelOverrunMoveSelection();
+                return;
+            } else {
+                int key = row * engine.scenario.cols + col;
+                if (reachableHexes.containsKey(key)) {
+                    PgDatabase.ActiveUnit u = pendingOverrunUnit;
+                    pendingOverrunUnit = null;
+                    PgDatabase.UnitDef def = engine.db.equipment.get(u.unitDefId);
+                    if (engine.moveUnit(u, col, row)) {
+                        if (engine.lastSurpriseReport != null) {
+                            sounds.playCombatSound(def);
+                            triggerExplosion(col, row, engine.lastSurpriseReport);
+                        } else {
+                            sounds.playMoveSound(def);
+                        }
+                        if (u.strength > 0) {
+                            selectUnit(u);
+                        } else {
+                            clearSelection();
+                        }
+                        if (listener != null) {
+                            listener.onUnitMoved(u, col, row);
+                        }
+                    }
+                    return;
+                } else {
+                    sounds.playClick();
+                    return;
+                }
+            }
         }
 
         if (engine.isDeploymentPhase) {
@@ -661,11 +766,19 @@ public class PgMapView extends View {
                 // Movement highlight
                 int key = r * cols + c;
                 if (reachableHexes.containsKey(key) && (c != selectedCol || r != selectedRow)) {
-                    highlightFillPaint.setColor(0x4032FF64);
-                    canvas.drawPath(hexPath, highlightFillPaint);
-                    hexStrokePaint.setColor(0xAA32FF64);
-                    hexStrokePaint.setStrokeWidth(1.6f);
-                    canvas.drawPath(hexPath, hexStrokePaint);
+                    if (pendingOverrunUnit != null) {
+                        highlightFillPaint.setColor(0x5800E676);
+                        canvas.drawPath(hexPath, highlightFillPaint);
+                        hexStrokePaint.setColor(0xFF00E676);
+                        hexStrokePaint.setStrokeWidth(2.3f);
+                        canvas.drawPath(hexPath, hexStrokePaint);
+                    } else {
+                        highlightFillPaint.setColor(0x4032FF64);
+                        canvas.drawPath(hexPath, highlightFillPaint);
+                        hexStrokePaint.setColor(0xAA32FF64);
+                        hexStrokePaint.setStrokeWidth(1.6f);
+                        canvas.drawPath(hexPath, hexStrokePaint);
+                    }
                 }
 
                 // Purchase deployment highlight
@@ -829,8 +942,10 @@ public class PgMapView extends View {
             drawZoomControls(canvas);
         }
 
-        // Draw floating combat report banner if recent
-        if (lastCombatBanner != null && System.currentTimeMillis() < bannerExpireTime) {
+        // Draw overrun move prompt banner or floating combat report banner if recent
+        if (pendingOverrunUnit != null && !strategicMapOverlay) {
+            drawOverrunMoveBanner(canvas);
+        } else if (lastCombatBanner != null && System.currentTimeMillis() < bannerExpireTime) {
             drawCombatBanner(canvas, lastCombatBanner);
             postInvalidateDelayed(250);
         } else if (!engine.isPlayerTurn && !strategicMapOverlay) {
@@ -980,6 +1095,35 @@ public class PgMapView extends View {
                 rep.defenderLosses, rep.defenderDestroyed && !rep.defenderSurrendered ? " (DESTROYED)" : "",
                 extra);
         canvas.drawText(detail, bx + bw * 0.5f, by + 57f, textPaint);
+    }
+
+    private void drawOverrunMoveBanner(Canvas canvas) {
+        if (pendingOverrunUnit == null) return;
+        float bw = Math.min(640f, getWidth() * 0.82f);
+        float bh = 74f;
+        float bx = (getWidth() - bw) * 0.5f;
+        float by = 84f;
+
+        badgePaint.setColor(0xEB15241A);
+        RectF r = new RectF(bx, by, bx + bw, by + bh);
+        canvas.drawRoundRect(r, 12f, 12f, badgePaint);
+
+        hexStrokePaint.setColor(0xFF00E676);
+        hexStrokePaint.setStrokeWidth(2.4f);
+        canvas.drawRoundRect(r, 12f, 12f, hexStrokePaint);
+
+        PgDatabase.UnitDef def = engine.db.equipment.get(pendingOverrunUnit.unitDefId);
+        String unitName = (pendingOverrunUnit.customTitle != null && !pendingOverrunUnit.customTitle.isEmpty())
+                ? pendingOverrunUnit.customTitle : (def != null ? def.name : "Tank");
+        int remMp = engine.getRemainingMovementPoints(pendingOverrunUnit);
+
+        textPaint.setColor(0xFF69F0AE);
+        textPaint.setTextSize(20.5f);
+        canvas.drawText("TANK OVERRUN MOVE — " + unitName + " (" + remMp + " MP)", bx + bw * 0.5f, by + 28f, textPaint);
+
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextSize(16.5f);
+        canvas.drawText("Tap any highlighted hex to move, or tap tank / STAY HERE to hold position", bx + bw * 0.5f, by + 55f, textPaint);
     }
 
     private void drawYourTurnBanner(Canvas canvas) {

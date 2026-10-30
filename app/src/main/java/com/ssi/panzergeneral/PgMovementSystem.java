@@ -418,8 +418,8 @@ public class PgMovementSystem {
         u.col = engine.lastUndoState.prevCol;
         u.row = engine.lastUndoState.prevRow;
         u.fuel = engine.lastUndoState.prevFuel;
-        u.movePointsUsed = 0;
-        u.moved = false;
+        u.movePointsUsed = engine.lastUndoState.prevMovePointsUsed;
+        u.moved = engine.lastUndoState.prevMoved;
         u.attacked = engine.lastUndoState.prevAttacked;
         u.entrenchment = engine.lastUndoState.prevEntrenchment;
         u.facingLeft = engine.lastUndoState.prevFacingLeft;
@@ -473,8 +473,8 @@ public class PgMovementSystem {
                 .prevCol(u.col)
                 .prevRow(u.row)
                 .prevFuel(u.fuel)
-                .prevMovePointsUsed(0)
-                .prevMoved(false)
+                .prevMovePointsUsed(u.movePointsUsed)
+                .prevMoved(u.moved)
                 .prevAttacked(u.attacked)
                 .prevInSeaTransport(u.inSeaTransport)
                 .prevInAirTransport(u.inAirTransport)
