@@ -76,7 +76,10 @@ public class PgMapView extends View {
     private final Paint hexStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint highlightFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint strengthTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF strengthRect = new RectF();
+    private final RectF strengthShadowRect = new RectF();
     private final Path hexPath = new Path();
 
     private final ScaleGestureDetector scaleDetector;
@@ -98,6 +101,12 @@ public class PgMapView extends View {
         textPaint.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
         textPaint.setShadowLayer(2.5f, 1f, 1f, Color.BLACK);
         textPaint.setTextAlign(Paint.Align.CENTER);
+
+        strengthTextPaint.setColor(Color.WHITE);
+        strengthTextPaint.setTextSize(10.0f);
+        strengthTextPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        strengthTextPaint.setShadowLayer(1.4f, 0.7f, 0.7f, 0xEE000000);
+        strengthTextPaint.setTextAlign(Paint.Align.CENTER);
 
         badgePaint.setStyle(Paint.Style.FILL);
 
@@ -870,6 +879,19 @@ public class PgMapView extends View {
                 if (groundUnit != null && !engine.isUnitVisibleToPlayer(groundUnit)) groundUnit = null;
                 if (airUnit != null && !engine.isUnitVisibleToPlayer(airUnit)) airUnit = null;
 
+                PgDatabase.ActiveUnit matchedTarget = null;
+                for (PgDatabase.ActiveUnit target : validTargets) {
+                    if (target != null && target.strength > 0 && target.col == c && target.row == r) {
+                        matchedTarget = target;
+                        break;
+                    }
+                }
+                if (matchedTarget != null) {
+                    buildHexPath(x, y);
+                    highlightFillPaint.setColor(0x36FF1744);
+                    canvas.drawPath(hexPath, highlightFillPaint);
+                }
+
                 if (groundUnit != null && airUnit != null) {
                     boolean groundSelected = (selectedUnit == groundUnit);
                     boolean airSelected = (selectedUnit == airUnit);
@@ -886,32 +908,26 @@ public class PgMapView extends View {
                     drawSingleUnit(canvas, airUnit, x, y, false);
                 }
 
-                // Draw valid target crosshair overlay + Panzer General Combat Prediction Odds badge
-                for (PgDatabase.ActiveUnit target : validTargets) {
-                    if (target == null || target.strength <= 0) continue;
-                    if (target.col == c && target.row == r) {
-                        buildHexPath(x, y);
-                        highlightFillPaint.setColor(0x45FF1744);
-                        canvas.drawPath(hexPath, highlightFillPaint);
-                        hexStrokePaint.setColor(0xFFFF1744);
-                        hexStrokePaint.setStrokeWidth(2.4f);
-                        canvas.drawPath(hexPath, hexStrokePaint);
+                // Draw valid target crosshair border + Panzer General Combat Prediction Odds badge
+                if (matchedTarget != null) {
+                    buildHexPath(x, y);
+                    hexStrokePaint.setColor(0xFFFF1744);
+                    hexStrokePaint.setStrokeWidth(2.4f);
+                    canvas.drawPath(hexPath, hexStrokePaint);
 
-                        if (selectedUnit != null) {
-                            PgGameEngine.CombatPrediction pred = engine.predictCombat(selectedUnit, target);
-                            badgePaint.setColor(0xDD1A1010);
-                            RectF oddsRect = new RectF(x + 9f, y + 2f, x + 51f, y + 14.5f);
-                            canvas.drawRoundRect(oddsRect, 3f, 3f, badgePaint);
-                            hexStrokePaint.setColor(0xFFFF5252);
-                            hexStrokePaint.setStrokeWidth(1f);
-                            canvas.drawRoundRect(oddsRect, 3f, 3f, hexStrokePaint);
-                            textPaint.setColor(0xFFFFE57F);
-                            textPaint.setTextSize(8.5f);
-                            String oddsText = "-" + pred.expectedAttackerLosses + " : -" + pred.expectedDefenderLosses
-                                    + (pred.ruggedDefenseChance ? "!" : "");
-                            canvas.drawText(oddsText, x + 30f, y + 11.2f, textPaint);
-                        }
-                        break;
+                    if (selectedUnit != null) {
+                        PgGameEngine.CombatPrediction pred = engine.predictCombat(selectedUnit, matchedTarget);
+                        badgePaint.setColor(0xDD1A1010);
+                        RectF oddsRect = new RectF(x + 9f, y + 2f, x + 51f, y + 14.5f);
+                        canvas.drawRoundRect(oddsRect, 3f, 3f, badgePaint);
+                        hexStrokePaint.setColor(0xFFFF5252);
+                        hexStrokePaint.setStrokeWidth(1f);
+                        canvas.drawRoundRect(oddsRect, 3f, 3f, hexStrokePaint);
+                        textPaint.setColor(0xFFFFE57F);
+                        textPaint.setTextSize(8.5f);
+                        String oddsText = "-" + pred.expectedAttackerLosses + " : -" + pred.expectedDefenderLosses
+                                + (pred.ruggedDefenseChance ? "!" : "");
+                        canvas.drawText(oddsText, x + 30f, y + 11.2f, textPaint);
                     }
                 }
             }
@@ -972,18 +988,43 @@ public class PgMapView extends View {
         }
 
         if (engine.showUnitStrength) {
-            // Draw strength badge from STRENGTH.SHP or crisp badge (supports Overstrength 11..15!)
-            int strIdx = Math.max(0, Math.min(14, u.strength - 1)) + (u.isAxis ? 0 : 15);
-            Bitmap strBmp = (u.strength <= 15) ? assets.getSprite("STRENGTH.SHP", strIdx) : null;
-            if (strBmp != null && u.strength <= 10) {
-                canvas.drawBitmap(strBmp, x, y, bitmapPaint);
+            // Crisp high-contrast faction strength plate (distinct Axis Feldgrau slate vs Allied Crimson pill)
+            float cornerRad = u.isAxis ? 2.2f : 4.6f;
+            strengthRect.set(x + 20.5f, y + 36.6f, x + 39.5f, y + 49.2f);
+            strengthShadowRect.set(x + 21.4f, y + 37.5f, x + 40.4f, y + 50.1f);
+
+            badgePaint.setColor(dimmed ? 0x66000000 : 0xA8000000);
+            canvas.drawRoundRect(strengthShadowRect, cornerRad, cornerRad, badgePaint);
+
+            int fillColor;
+            int strokeColor;
+            int digitColor;
+            if (u.isAxis) {
+                fillColor = (u.strength > 10) ? 0xF5165B28 : 0xF51E2B37;
+                strokeColor = (u.isCore || u.strength > 10) ? 0xFFFFD54F : 0xFF90CAF9;
+                digitColor = (u.strength > 10) ? 0xFFFFF59D : Color.WHITE;
             } else {
-                badgePaint.setColor(u.isAxis ? (u.strength > 10 ? 0xFF1B5E20 : 0xFF37474F) : 0xFF5D4037);
-                canvas.drawRect(x + 21f, y + 38f, x + 39f, y + 49f, badgePaint);
-                textPaint.setColor(u.isCore ? 0xFFFFD700 : Color.WHITE);
-                textPaint.setTextSize(9f);
-                canvas.drawText(String.valueOf(u.strength), x + 30f, y + 47f, textPaint);
+                fillColor = 0xF69E1B1B;
+                strokeColor = 0xFFFFD180;
+                digitColor = Color.WHITE;
             }
+            if (dimmed) {
+                fillColor = (fillColor & 0x00FFFFFF) | 0xBE000000;
+                strokeColor = (strokeColor & 0x00FFFFFF) | 0xBE000000;
+                digitColor = (digitColor & 0x00FFFFFF) | 0xD0000000;
+            }
+
+            badgePaint.setColor(fillColor);
+            canvas.drawRoundRect(strengthRect, cornerRad, cornerRad, badgePaint);
+
+            hexStrokePaint.setColor(strokeColor);
+            hexStrokePaint.setStrokeWidth(u.isAxis ? 1.05f : 1.2f);
+            canvas.drawRoundRect(strengthRect, cornerRad, cornerRad, hexStrokePaint);
+
+            strengthTextPaint.setColor(digitColor);
+            Paint.FontMetrics fm = strengthTextPaint.getFontMetrics();
+            float textBaseline = strengthRect.centerY() - (fm.ascent + fm.descent) * 0.5f;
+            canvas.drawText(String.valueOf(u.strength), strengthRect.centerX(), textBaseline, strengthTextPaint);
 
             // Draw experience star indicator
             int stars = u.getStars();
@@ -995,11 +1036,14 @@ public class PgMapView extends View {
             }
         }
 
-        // Suppression badge
+        // Suppression badge (distinct tactical amber-orange so it never clashes with Allied crimson strength)
         if (u.suppression > 0) {
-            badgePaint.setColor(0xDDE53935);
+            badgePaint.setColor(0xEEEF6C00);
             RectF sRect = new RectF(x + 3f, y + 37f, x + 18f, y + 49f);
             canvas.drawRoundRect(sRect, 3f, 3f, badgePaint);
+            hexStrokePaint.setColor(0xFFFFD54F);
+            hexStrokePaint.setStrokeWidth(0.9f);
+            canvas.drawRoundRect(sRect, 3f, 3f, hexStrokePaint);
             textPaint.setColor(Color.WHITE);
             textPaint.setTextSize(8.5f);
             canvas.drawText("S" + Math.min(99, u.suppression), x + 10.5f, y + 46.5f, textPaint);

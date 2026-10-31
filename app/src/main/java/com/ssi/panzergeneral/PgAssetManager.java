@@ -53,11 +53,10 @@ public class PgAssetManager {
     }
 
     private void loadWarpal() {
-        // Default fallback palette
+        // Default fallback palette (SSI SHP uses cmd==1 skips for transparency; index 0 is opaque black)
         for (int i = 0; i < 256; i++) {
             defaultPalette[i] = 0xFF000000 | (i << 16) | (i << 8) | i;
         }
-        defaultPalette[0] = 0x00000000;
         try {
             byte[] lbm = readAssetBytes("dat/WARPAL.LBM");
             for (int i = 0; i < lbm.length - 8; i++) {
@@ -67,7 +66,7 @@ public class PgAssetManager {
                         int r = lbm[cmapStart + c * 3] & 0xFF;
                         int g = lbm[cmapStart + c * 3 + 1] & 0xFF;
                         int b = lbm[cmapStart + c * 3 + 2] & 0xFF;
-                        defaultPalette[c] = (c == 0) ? 0x00000000 : (0xFF000000 | (r << 16) | (g << 8) | b);
+                        defaultPalette[c] = 0xFF000000 | (r << 16) | (g << 8) | b;
                     }
                     break;
                 }
@@ -155,12 +154,11 @@ public class PgAssetManager {
                     int r = Math.min(255, (r6 << 2) | (r6 >> 4));
                     int g = Math.min(255, (g6 << 2) | (g6 >> 4));
                     int b = Math.min(255, (b6 << 2) | (b6 >> 4));
-                    pal[cIdx] = (cIdx == 0) ? 0x00000000 : (0xFF000000 | (r << 16) | (g << 8) | b);
+                    pal[cIdx] = 0xFF000000 | (r << 16) | (g << 8) | b;
                     pPos += 4;
                 }
             }
         }
-        pal[0] = 0x00000000;
 
         int[] pixels = new int[w * h];
         int rows = y2 - y1 + 1;
@@ -182,7 +180,7 @@ public class PgAssetManager {
                         int val = data[pos++] & 0xFF;
                         int argb = pal[val];
                         for (int k = 0; k < cnt; k++) {
-                            if (py >= 0 && py < h && col >= 0 && col < w && val != 0) {
+                            if (py >= 0 && py < h && col >= 0 && col < w) {
                                 int drawX = flipX ? (w - 1 - col) : col;
                                 pixels[py * w + drawX] = argb;
                             }
@@ -192,7 +190,7 @@ public class PgAssetManager {
                         int cnt = cmd >> 1;
                         for (int k = 0; k < cnt && pos < data.length; k++) {
                             int val = data[pos++] & 0xFF;
-                            if (py >= 0 && py < h && col >= 0 && col < w && val != 0) {
+                            if (py >= 0 && py < h && col >= 0 && col < w) {
                                 int drawX = flipX ? (w - 1 - col) : col;
                                 pixels[py * w + drawX] = pal[val];
                             }
