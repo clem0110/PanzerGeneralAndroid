@@ -466,6 +466,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         btnMount.setOnClickListener(v -> {
             PgDatabase.ActiveUnit u = mapView.selectedUnit;
             if (u != null && engine.canUseTransportAction(u)) {
+                boolean canOrganic = engine.canToggleOrganicTransport(u);
+                boolean canSea = engine.canSeaEmbark(u);
+                boolean canAir = engine.canAirliftEmbark(u);
+                if (canOrganic && (canSea || canAir)) {
+                    sounds.playClick();
+                    showTransportChoiceDialog(u, canSea, canAir);
+                    return;
+                }
                 String msg = engine.executeTransportAction(u);
                 sounds.playSelect();
                 mapView.selectUnit(u);
@@ -853,6 +861,66 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     mapView.selectUnit(attacker);
                     refreshHud();
                 })
+                .show();
+    }
+
+    private void showTransportChoiceDialog(PgDatabase.ActiveUnit u, boolean canSea, boolean canAir) {
+        if (u == null || !engine.units.contains(u) || u.strength <= 0) return;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        PgDatabase.UnitDef trp = (u.transportDefId > 0 && u.transportDefId < db.equipment.size())
+                ? db.equipment.get(u.transportDefId) : null;
+
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+
+        if (engine.canToggleOrganicTransport(u) && trp != null) {
+            String mountLabel = u.mountedInTransport
+                    ? String.format(Locale.ROOT, "Unmount %s (Foot Combat • %d MP)", trp.name, def.movement)
+                    : String.format(Locale.ROOT, "Mount %s (Land Transport • %d MP)", trp.name, trp.movement);
+            labels.add(mountLabel);
+            actions.add(() -> {
+                String msg = engine.executeOrganicTransportToggle(u);
+                sounds.playSelect();
+                mapView.selectUnit(u);
+                refreshHud();
+                if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (canSea && engine.canSeaEmbark(u)) {
+            int seaMp = Math.max(4, engine.getSeaTransportDef(u.isAxis).movement);
+            labels.add(String.format(Locale.ROOT, "Sea Embark (Naval Transport • %d MP)", seaMp));
+            actions.add(() -> {
+                String msg = engine.executeSeaEmbark(u);
+                sounds.playSelect();
+                mapView.selectUnit(u);
+                refreshHud();
+                if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (canAir && engine.canAirliftEmbark(u)) {
+            int airMp = Math.max(10, engine.getAirTransportDef().movement);
+            labels.add(String.format(Locale.ROOT, "Airlift (Ju 52 Air Transport • %d MP)", airMp));
+            actions.add(() -> {
+                String msg = engine.executeAirliftEmbark(u);
+                sounds.playSelect();
+                mapView.selectUnit(u);
+                refreshHud();
+                if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (labels.isEmpty()) return;
+
+        new AlertDialog.Builder(this)
+                .setTitle("Transport Options — " + (def != null ? def.name : "Unit"))
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    if (which >= 0 && which < actions.size()) {
+                        actions.get(which).run();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 

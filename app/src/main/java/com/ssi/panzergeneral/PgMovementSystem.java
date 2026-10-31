@@ -587,23 +587,107 @@ public class PgMovementSystem {
     }
 
     // Panzer General Manual: Embark / Disembark Air Transport (Paratroops), Sea Transport (Ports), and Organic Transport
-    public String getTransportActionLabel(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis) return "MOUNT";
+    public boolean canToggleOrganicTransport(PgDatabase.ActiveUnit u) {
+        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def == null || def.isFortification() || def.isAir() || def.isNaval()) return false;
+        if (u.inAirTransport || u.inSeaTransport) return false;
+        if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
+        return !u.moved && u.movePointsUsed == 0 && u.transportDefId > 0;
+    }
+
+    public boolean canSeaEmbark(PgDatabase.ActiveUnit u) {
+        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def == null || def.isFortification() || def.isAir() || def.isNaval()) return false;
+        if (u.inAirTransport || u.inSeaTransport || u.attacked) return false;
+        if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
+        PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
+        return cell.isPort() && db.isAxisNation(cell.ownerNation, engine.scenario);
+    }
+
+    public boolean canAirliftEmbark(PgDatabase.ActiveUnit u) {
+        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def == null || def.isFortification() || def.isAir() || def.isNaval()) return false;
+        if (u.inAirTransport || u.inSeaTransport || u.attacked || u.moved || u.movePointsUsed > 0) return false;
+        if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
+        PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
+        return cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, engine.scenario)
+                && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
+                && getUnitAt(u.col, u.row, true) == null;
+    }
+
+    public String executeOrganicTransportToggle(PgDatabase.ActiveUnit u) {
+        if (!canToggleOrganicTransport(u)) return null;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        engine.lastUndoState = null;
+        u.mountedInTransport = !u.mountedInTransport;
+        if (u.mountedInTransport) {
+            u.entrenchment = 0;
+        }
+        PgDatabase.UnitDef trp = db.equipment.get(u.transportDefId);
+        return def.name + (u.mountedInTransport
+                ? " mounted in " + trp.name + " (" + trp.movement + " MP)."
+                : " dismounted for foot combat (" + def.movement + " MP).");
+    }
+
+    public String executeSeaEmbark(PgDatabase.ActiveUnit u) {
+        if (!canSeaEmbark(u)) return null;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        engine.lastUndoState = null;
+        boolean hadMoved = u.moved || u.movePointsUsed > 0;
+        u.inSeaTransport = true;
+        u.mountedInTransport = false;
+        u.entrenchment = 0;
+        u.attacked = true; // Sea transport cannot attack
+        if (hadMoved) {
+            u.moved = true;
+            u.movePointsUsed = getMaxMovementPoints(u);
+            return def.name + " embarked into Naval Transport (movement completed for this turn).";
+        } else {
+            u.moved = false;
+            u.movePointsUsed = 0;
+            return def.name + " embarked into Naval Transport! Ready to sail (" + getMaxMovementPoints(u) + " MP).";
+        }
+    }
+
+    public String executeAirliftEmbark(PgDatabase.ActiveUnit u) {
+        if (!canAirliftEmbark(u)) return null;
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        engine.lastUndoState = null;
+        u.inAirTransport = true;
+        u.mountedInTransport = false;
+        u.moved = true;
+        u.attacked = true;
+        u.movePointsUsed = getMaxMovementPoints(u);
+        return def.name + " embarked into Ju 52 Air Transport!";
+    }
+
+    public String getTransportActionLabel(PgDatabase.ActiveUnit u) {
+        if (u == null || !u.isAxis || engine.scenario == null) return "MOUNT";
+        PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+        if (def == null) return "MOUNT";
         if (def.isFortification()) return "IMMOBILE";
         if (u.inAirTransport) return "PARADROP";
         if (u.inSeaTransport) return "DISEMBARK";
-        PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
-        if (!def.isAir() && !def.isNaval() && !u.attacked) {
-            if (cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, engine.scenario)
-                    && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
-                    && !u.moved && u.movePointsUsed == 0
-                    && getUnitAt(u.col, u.row, true) == null) {
-                return "AIRLIFT";
-            }
-            if (cell.isPort() && db.isAxisNation(cell.ownerNation, engine.scenario)) {
-                return "SEA EMBARK";
-            }
+        if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) {
+            return u.mountedInTransport ? "UNMOUNT" : "MOUNT";
+        }
+        boolean organic = canToggleOrganicTransport(u);
+        boolean airlift = canAirliftEmbark(u);
+        boolean sea = canSeaEmbark(u);
+        if (organic && sea) {
+            return u.mountedInTransport ? "UNMOUNT/SEA" : "MOUNT / SEA";
+        }
+        if (organic && airlift) {
+            return u.mountedInTransport ? "UNMOUNT/AIR" : "MOUNT / AIR";
+        }
+        if (airlift) {
+            return "AIRLIFT";
+        }
+        if (sea) {
+            return "SEA EMBARK";
         }
         return u.mountedInTransport ? "UNMOUNT" : "MOUNT";
     }
@@ -611,7 +695,7 @@ public class PgMovementSystem {
     public boolean canUseTransportAction(PgDatabase.ActiveUnit u) {
         if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-        if (def.isFortification()) return false;
+        if (def == null || def.isFortification()) return false;
         if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
         PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
         if (u.inAirTransport) {
@@ -628,17 +712,7 @@ public class PgMovementSystem {
             }
             return false;
         }
-        if (!u.attacked && !def.isAir() && !def.isNaval()) {
-            if (cell.isPort() && db.isAxisNation(cell.ownerNation, engine.scenario)) {
-                return true;
-            }
-            if (!u.moved && u.movePointsUsed == 0 && cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, engine.scenario)
-                    && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
-                    && getUnitAt(u.col, u.row, true) == null) {
-                return true;
-            }
-        }
-        return !u.moved && u.movePointsUsed == 0 && u.transportDefId > 0;
+        return canSeaEmbark(u) || canAirliftEmbark(u) || canToggleOrganicTransport(u);
     }
 
     public String executeTransportAction(PgDatabase.ActiveUnit u) {
@@ -710,41 +784,14 @@ public class PgMovementSystem {
                 return def.name + " disembarked in port.";
             }
         }
-        if (!u.attacked && !def.isAir() && !def.isNaval()) {
-            if (cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, engine.scenario)
-                    && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
-                    && getUnitAt(u.col, u.row, true) == null && !u.moved && u.movePointsUsed == 0) {
-                u.inAirTransport = true;
-                u.mountedInTransport = false;
-                u.moved = true;
-                u.attacked = true;
-                u.movePointsUsed = getMaxMovementPoints(u);
-                return def.name + " embarked into Ju 52 Air Transport!";
-            }
-            if (cell.isPort() && db.isAxisNation(cell.ownerNation, engine.scenario)) {
-                boolean hadMoved = u.moved || u.movePointsUsed > 0;
-                u.inSeaTransport = true;
-                u.mountedInTransport = false;
-                u.entrenchment = 0;
-                u.attacked = true; // Sea transport cannot attack
-                if (hadMoved) {
-                    u.moved = true;
-                    u.movePointsUsed = getMaxMovementPoints(u);
-                    return def.name + " embarked into Naval Transport (movement completed for this turn).";
-                } else {
-                    u.moved = false;
-                    u.movePointsUsed = 0;
-                    return def.name + " embarked into Naval Transport! Ready to sail (" + getMaxMovementPoints(u) + " MP).";
-                }
-            }
+        if (canAirliftEmbark(u)) {
+            return executeAirliftEmbark(u);
         }
-        if (u.transportDefId > 0) {
-            u.mountedInTransport = !u.mountedInTransport;
-            if (u.mountedInTransport) {
-                u.entrenchment = 0;
-            }
-            PgDatabase.UnitDef trp = db.equipment.get(u.transportDefId);
-            return def.name + (u.mountedInTransport ? " mounted in " + trp.name + " (" + trp.movement + " MP)." : " dismounted for foot combat (" + def.movement + " MP).");
+        if (canSeaEmbark(u)) {
+            return executeSeaEmbark(u);
+        }
+        if (canToggleOrganicTransport(u)) {
+            return executeOrganicTransportToggle(u);
         }
         return null;
     }

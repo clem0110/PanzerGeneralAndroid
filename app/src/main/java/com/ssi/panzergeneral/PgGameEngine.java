@@ -420,6 +420,30 @@ public class PgGameEngine {
         return movementSystem.canUseTransportAction(u);
     }
 
+    public boolean canToggleOrganicTransport(PgDatabase.ActiveUnit u) {
+        return movementSystem.canToggleOrganicTransport(u);
+    }
+
+    public boolean canSeaEmbark(PgDatabase.ActiveUnit u) {
+        return movementSystem.canSeaEmbark(u);
+    }
+
+    public boolean canAirliftEmbark(PgDatabase.ActiveUnit u) {
+        return movementSystem.canAirliftEmbark(u);
+    }
+
+    public String executeOrganicTransportToggle(PgDatabase.ActiveUnit u) {
+        return movementSystem.executeOrganicTransportToggle(u);
+    }
+
+    public String executeSeaEmbark(PgDatabase.ActiveUnit u) {
+        return movementSystem.executeSeaEmbark(u);
+    }
+
+    public String executeAirliftEmbark(PgDatabase.ActiveUnit u) {
+        return movementSystem.executeAirliftEmbark(u);
+    }
+
     public String executeTransportAction(PgDatabase.ActiveUnit u) {
         return movementSystem.executeTransportAction(u);
     }
