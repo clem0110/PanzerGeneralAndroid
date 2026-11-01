@@ -95,6 +95,7 @@ public class PgGameEngine {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SaveState implements Serializable {
+        private static final long serialVersionUID = -395545998425512727L;
         public boolean isCampaign;
         public int campaignEntryIndex;
         public int currentScenarioNumber;
@@ -124,6 +125,9 @@ public class PgGameEngine {
         public boolean[][] fogVisible;
         public String saveTimestamp;
         public String scenarioTitle;
+        public boolean westDefeated;
+        public boolean eastDefeated;
+        public boolean lowCountriesLost;
     }
 
     public interface AiTurnCallback {
@@ -145,8 +149,11 @@ public class PgGameEngine {
     // Shared Scenario & Campaign State
     public PgDatabase.ScenarioData scenario;
     public boolean isCampaignMode = true;
-    public int campaignIndex = 0; // 0=1939, 1=1940, 2=1941, 3=1942, 4=1943W, 5=1943E
+    public int campaignIndex = 0; // 0=1939 Poland, 1=1941 North Africa, 2=1941 Barbarossa, 3=1943 Husky, 4=1943 Kharkov
     public int currentScenarioNumber = 1;
+    public boolean westDefeated = false;     // [NoW] War over in the West (Britain/Western Allies defeated)
+    public boolean eastDefeated = false;     // [NoE] War over in the East (Soviet Union defeated)
+    public boolean lowCountriesLost = false; // France_II branch (Sealion 1940 window lost due to Low Countries defeat)
     public int turn = 1;
     public int maxTurns = 15;
     public int weather = 0; // 0=Clear, 1=Overcast, 2=Storm
@@ -185,14 +192,13 @@ public class PgGameEngine {
 
     public static final String[] CAMPAIGN_NAMES = {
         "1939 Poland (Grand Campaign)",
-        "1940 West (Low Countries & France)",
-        "1941 Barbarossa (Eastern Front)",
-        "1941 North Africa (Afrika Korps)",
-        "1943 Husky (Defense of Italy)",
-        "1943 Kursk (Citadel & East)"
+        "1941 North Africa (Western Campaign)",
+        "1941 Barbarossa (Eastern Campaign)",
+        "1943 Husky (Western Campaign)",
+        "1943 Kharkov (Eastern Campaign)"
     };
-    public static final int[] CAMPAIGN_START_SCENARIOS = {1, 4, 23, 7, 13, 30};
-    public static final int[] CAMPAIGN_START_PRESTIGE = {400, 800, 1200, 900, 1500, 1800};
+    public static final int[] CAMPAIGN_START_SCENARIOS = {1, 7, 23, 13, 29};
+    public static final int[] CAMPAIGN_START_PRESTIGE = {500, 1500, 2500, 3500, 3500};
 
     public PgGameEngine(PgDatabase db) {
         this.db = db;
@@ -232,6 +238,15 @@ public class PgGameEngine {
 
     public void checkVictoryConditions() {
         campaignManager.checkVictoryConditions();
+    }
+
+    public PgCampaignManager.CampaignStepResult resolveScenarioOutcome(int outcome) {
+        return campaignManager.resolveScenarioOutcome(outcome);
+    }
+
+    public void commitCampaignTransition(PgCampaignManager.CampaignStepResult step,
+                                         PgCampaignManager.BranchOption chosen) throws IOException {
+        campaignManager.commitCampaignTransition(step, chosen);
     }
 
     public String getWeatherLabel() {

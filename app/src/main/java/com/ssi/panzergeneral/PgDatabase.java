@@ -310,6 +310,20 @@ public class PgDatabase {
         loadScenarioCatalog();
     }
 
+    public String readBriefing(int... brfIds) {
+        if (assetManager == null || brfIds == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int id : brfIds) {
+            if (id <= 0) continue;
+            String part = assetManager.readBriefing(id);
+            if (part != null && !part.isEmpty()) {
+                if (sb.length() > 0) sb.append("\n\n");
+                sb.append(part);
+            }
+        }
+        return sb.toString();
+    }
+
     private void loadEquipment() {
         try {
             byte[] data = assetManager.readAssetBytes("dat/PANZEQUP.EQP");
@@ -393,12 +407,64 @@ public class PgDatabase {
         } catch (IOException ignored) {
         }
 
-        // Map scenario index (1..38) to primary briefing file in SCNBRIEF
-        int[] primaryBrfIds = {
-            1, 5, 8, 12, 17, 25, 29, 33, 37, 41,
-            45, 50, 54, 59, 65, 69, 73, 80, 84, 88,
-            92, 96, 100, 104, 108, 112, 116, 120, 124, 128,
-            132, 136, 140, 144, 148, 152, 156, 160
+        // Authentic intro briefing IDs in SCNBRIEF (BDB0001..BDB0177) for scenarios 1..38
+        int[][] introBrfIds = {
+            {1}, {5}, {8}, {12}, {17, 173}, {25, 161}, {29}, {33}, {37}, {41},
+            {45}, {50}, {54}, {59}, {65}, {69}, {73}, {80}, {84}, {88, 148},
+            {92}, {96}, {100}, {104}, {108, 175}, {113}, {118}, {82}, {127}, {131},
+            {135}, {139}, {125}, {126, 148}, {156, 177}, {152}, {108, 157}, {160, 161}
+        };
+
+        // Authentic CAMPAIGN.DAT Major/Decisive Victory turns-remaining thresholds for scenarios 1..38
+        // (0 indicates objective-count defensive or special conditions evaluated in PgCampaignManager)
+        int[] authenticDecisiveTurnsLeft = {
+            3, 7, 6, 5, 5, 2, 3, 5, 3, 8,
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            3, 2, 5, 6, 4, 3, 6, 6, 7, 4,
+            5, 0, 5, 0, 0, 7, 5, 2
+        };
+
+        // Authentic CAMPAIGN.DAT primary default next-scenario names (used as non-???? metadata summary;
+        // full stateful branching & High Command player choices are evaluated in PgCampaignManager)
+        String[][] defaultBranches = {
+            {"Warsaw", "Warsaw", "LOSS"},                         // 1 Poland
+            {"Norway", "Low Countries", "LOSS"},                  // 2 Warsaw
+            {"Low Countries", "Low Countries", "Low Countries"},  // 3 Norway
+            {"France", "France", "France"},                       // 4 Low Countries
+            {"Sealion (40)", "North Africa", "LOSS"},             // 5 France
+            {"Barbarossa", "North Africa", "LOSS"},               // 6 Sealion (40)
+            {"Middle East", "El Alamein", "Torch"},               // 7 North Africa
+            {"Sealion (43)", "Caucasus", "El Alamein"},           // 8 Middle East
+            {"Sealion (43)", "Torch", "Torch"},                   // 9 El Alamein
+            {"Moscow (42)", "Kharkov", "Kharkov"},                // 10 Caucasus
+            {"Moscow (43)", "Moscow (43)", "Anzio"},              // 11 Sealion (43)
+            {"Husky", "Husky", "Husky"},                          // 12 Torch
+            {"Moscow (43)", "Anzio", "Anzio"},                    // 13 Husky
+            {"D-Day", "D-Day", "LOSS"},                           // 14 Anzio
+            {"Anvil", "Cobra", "Cobra"},                          // 15 D-Day
+            {"Ardennes", "Market-Garden", "Market-Garden"},       // 16 Anvil
+            {"Budapest", "Berlin", "Berlin"},                     // 17 Ardennes
+            {"Ardennes", "Market-Garden", "Market-Garden"},       // 18 Cobra
+            {"Ardennes", "Ardennes", "Berlin"},                   // 19 Market-Garden
+            {"MWIN", "DRAW", "LOSS"},                             // 20 Berlin (West)
+            {"Crete", "Barbarossa", "Barbarossa"},                // 21 Balkans
+            {"Barbarossa", "Barbarossa", "Barbarossa"},           // 22 Crete
+            {"Kiev", "Kiev", "LOSS"},                             // 23 Barbarossa
+            {"Moscow (41)", "Moscow (41)", "Sevastopol"},         // 24 Kiev
+            {"Sealion (43)", "Sevastopol", "Sevastopol"},         // 25 Moscow (41)
+            {"Stalingrad", "Stalingrad", "LOSS"},                 // 26 Sevastopol
+            {"Sealion (43)", "Kharkov", "Kharkov"},               // 27 Moscow (42)
+            {"Moscow (42)", "Kharkov", "Kharkov"},                // 28 Stalingrad
+            {"Moscow (43)", "Kursk", "Byelorussia"},              // 29 Kharkov
+            {"Moscow (43)", "Byelorussia", "Byelorussia"},        // 30 Kursk
+            {"D-Day", "Byelorussia", "Byelorussia"},              // 31 Moscow (43)
+            {"Ardennes", "Ardennes", "Berlin"},                   // 32 Byelorussia
+            {"Berlin (West)", "Berlin", "Berlin"},                // 33 Budapest
+            {"MWIN", "DRAW", "LOSS"},                             // 34 Berlin (East)
+            {"DRAW", "DRAW", "LOSS"},                             // 35 Berlin
+            {"DWIN", "MWIN", "LOSS"},                             // 36 Washington
+            {"Sealion (43)", "Sevastopol", "Sevastopol"},         // 37 Early Moscow
+            {"Barbarossa", "North Africa", "LOSS"}                // 38 Sealion Plus
         };
 
         try {
@@ -415,32 +481,29 @@ public class PgDatabase {
                 while (dEnd < descOff + 160 && dEnd < stat.length && stat[dEnd] != 0) dEnd++;
                 String description = new String(stat, descOff, dEnd - descOff, StandardCharsets.US_ASCII).trim();
 
-                int brfId = (s - 1 < primaryBrfIds.length) ? primaryBrfIds[s - 1] : s;
-                String briefingText = assetManager.readBriefing(brfId);
+                int[] brfIds = (s - 1 < introBrfIds.length) ? introBrfIds[s - 1] : new int[]{s};
+                String briefingText = readBriefing(brfIds);
                 if (briefingText.isEmpty()) {
                     briefingText = description;
                 }
 
-                // Read header of GAME%03d.SCN for turns & date
+                // Read header of GAME%03d.SCN for turns (offset 21), date (offsets 22..24), and prestige (offsets 27..30)
                 byte[] scn = assetManager.readAssetBytes(String.format(Locale.ROOT, "dat/GAME%03d.SCN", s));
                 ByteBuffer scnBb = ByteBuffer.wrap(scn).order(ByteOrder.LITTLE_ENDIAN);
-                int turns = scn[18] & 0xFF;
+                int turns = (scn[21] & 0xFF) > 0 ? (scn[21] & 0xFF) : (scn[18] & 0xFF);
                 int day = scn[22] & 0xFF;
                 int month = scn[23] & 0xFF;
                 int year = 1900 + (scn[24] & 0xFF);
-                int deployCount = Short.toUnsignedInt(scnBb.getShort(0x75));
-                int metaOff = 0x77 + deployCount * 4;
-                int axisPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(metaOff)));
-                int alliedPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(metaOff + 2)));
+                int axisPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(27)));
+                int alliedPrestige = Math.max(200, Short.toUnsignedInt(scnBb.getShort(29)));
 
-                // Match with SCENARIO.TDB for campaign branching
-                String nextDecisive = (s < 38) ? String.valueOf(s + 1) : "VICTORY";
-                String nextMarginal = (s < 38) ? String.valueOf(s + 1) : "VICTORY";
-                String nextLoss = "LOSS";
-                int decisiveTurnsRemaining = Math.max(3, turns / 4);
-                int prestigeDecisive = 600;
-                int prestigeMarginal = 400;
-                int prestigeLoss = 200;
+                String nextDecisive = defaultBranches[s - 1][0];
+                String nextMarginal = defaultBranches[s - 1][1];
+                String nextLoss = defaultBranches[s - 1][2];
+                int decisiveTurnsRemaining = authenticDecisiveTurnsLeft[s - 1];
+                int prestigeDecisive = 800;
+                int prestigeMarginal = 500;
+                int prestigeLoss = "LOSS".equals(nextLoss) ? 0 : 300;
 
                 String[] tdb = tdbMap.get(shortTitle.toUpperCase(Locale.ROOT));
                 if (tdb == null) {
@@ -454,12 +517,24 @@ public class PgDatabase {
                 }
                 if (tdb != null && tdb.length >= 10) {
                     fullTitle = tdb[0].trim();
-                    nextDecisive = tdb[2].trim();
-                    nextMarginal = tdb[3].trim();
-                    nextLoss = tdb[4].trim();
-                    try { prestigeDecisive = Integer.parseInt(tdb[7].trim()); } catch (Exception ignored) {}
-                    try { prestigeMarginal = Integer.parseInt(tdb[8].trim()); } catch (Exception ignored) {}
-                    try { prestigeLoss = Integer.parseInt(tdb[9].trim()); } catch (Exception ignored) {}
+                    String tdv = tdb[2].trim();
+                    String tmv = tdb[3].trim();
+                    String tls = tdb[4].trim();
+                    if (!tdv.isEmpty() && !"????".equals(tdv)) nextDecisive = tdv;
+                    if (!tmv.isEmpty() && !"????".equals(tmv)) nextMarginal = tmv;
+                    if (!tls.isEmpty() && !"????".equals(tls)) nextLoss = tls;
+                    try {
+                        int dvp = Integer.parseInt(tdb[7].trim());
+                        if (dvp > 0) prestigeDecisive = dvp;
+                    } catch (Exception ignored) {}
+                    try {
+                        int mvp = Integer.parseInt(tdb[8].trim());
+                        if (mvp > 0) prestigeMarginal = mvp;
+                    } catch (Exception ignored) {}
+                    try {
+                        int lsp = Integer.parseInt(tdb[9].trim());
+                        if (lsp > 0 || "LOSS".equals(nextLoss)) prestigeLoss = lsp;
+                    } catch (Exception ignored) {}
                 }
 
                 ScenarioMeta m = ScenarioMeta.builder()
@@ -500,8 +575,12 @@ public class PgDatabase {
         } catch (NumberFormatException ignored) {
         }
         for (ScenarioMeta m : scenarios) {
-            if (m.fullTitle.equalsIgnoreCase(clean) || m.shortTitle.equalsIgnoreCase(clean)
-                    || clean.startsWith(m.shortTitle.toUpperCase(Locale.ROOT))) {
+            if (m.fullTitle.equalsIgnoreCase(clean) || m.shortTitle.equalsIgnoreCase(clean)) {
+                return m.number;
+            }
+        }
+        for (ScenarioMeta m : scenarios) {
+            if (clean.startsWith(m.shortTitle.toUpperCase(Locale.ROOT))) {
                 return m.number;
             }
         }
@@ -670,11 +749,10 @@ public class PgDatabase {
             }
         }
 
-        if (meta != null && meta.fullTitle != null) {
-            String title = meta.fullTitle.toLowerCase(Locale.ROOT);
-            sd.isDefensiveScenario = title.contains("husky") || title.contains("anzio")
-                    || title.contains("d-day") || title.contains("berlin") || title.contains("defense");
-        }
+        // Authentic Axis defensive scenarios: GAME*.SCN header byte 14 == 0 (Allied strategic initiative:
+        // Husky, Anzio, D-Day, Anvil, Cobra, Market-Garden, Berlin West, Byelorussia, Berlin East, Berlin)
+        // plus Scenario 12 (Torch: Axis defending Tunisia against Operation Torch landings).
+        sd.isDefensiveScenario = ((scn[14] & 0xFF) == 0) || (scenNum == 12);
 
         return sd;
     }

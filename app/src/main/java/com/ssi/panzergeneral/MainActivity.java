@@ -1518,61 +1518,173 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void checkScenarioCompletion() {
-        if (engine.scenarioOutcome == 0) return;
+        if (engine.scenarioOutcome == 0 || engine.scenario == null) return;
         int outcome = engine.scenarioOutcome;
         engine.scenarioOutcome = 0; // prevent duplicate dialogs
 
         PgDatabase.ScenarioMeta meta = engine.scenario.meta;
+        PgCampaignManager.CampaignStepResult step = engine.resolveScenarioOutcome(outcome);
+
         String title;
-        String nextScenKey;
-        int bonusPrestige;
-        if (outcome == 1) {
-            title = "DECISIVE VICTORY!";
-            nextScenKey = meta.nextDecisive;
-            bonusPrestige = Math.max(500, meta.prestigeDecisive);
-        } else if (outcome == 2) {
-            title = "MARGINAL VICTORY!";
-            nextScenKey = meta.nextMarginal;
-            bonusPrestige = Math.max(300, meta.prestigeMarginal);
+        if (!engine.isCampaignMode || step.hasNextScenario()) {
+            if (outcome == 1) {
+                title = "MAJOR VICTORY!";
+            } else if (outcome == 2) {
+                title = "MINOR VICTORY!";
+            } else {
+                title = (engine.isCampaignMode && step.hasNextScenario())
+                        ? "TACTICAL DEFEAT — CAMPAIGN CONTINUES"
+                        : "DEFEAT";
+            }
         } else {
-            title = "DEFEAT";
-            nextScenKey = meta.nextLoss;
-            bonusPrestige = meta.prestigeLoss;
+            switch (step.endType) {
+                case DECISIVE_VICTORY:
+                    title = "SUPREME CAMPAIGN VICTORY!";
+                    break;
+                case MAJOR_VICTORY:
+                    title = "CAMPAIGN VICTORY!";
+                    break;
+                case ARMISTICE_DRAW:
+                    title = "ARMISTICE SIGNED";
+                    break;
+                case HONORABLE_RETIRE:
+                    title = "HONORABLE RETIREMENT";
+                    break;
+                default:
+                    title = "DEFEAT";
+                    break;
+            }
         }
 
-        int nextScenNum = db.findScenarioNumberByName(nextScenKey);
+        int completedTurn = Math.min(engine.turn, engine.maxTurns);
         StringBuilder msg = new StringBuilder();
         msg.append("Scenario: ").append(meta.fullTitle).append("\n");
-        msg.append("Completed on Turn ").append(engine.turn).append(" of ").append(engine.maxTurns).append("\n");
-        msg.append("Prestige Awarded: +").append(bonusPrestige).append("\n\n");
-        if (engine.isCampaignMode && nextScenNum > 0) {
-            PgDatabase.ScenarioMeta nextMeta = db.scenarios.get(nextScenNum - 1);
-            msg.append("Next Campaign Assignment: #").append(nextScenNum).append(" ").append(nextMeta.fullTitle);
-        } else if (outcome <= 2) {
-            msg.append("Congratulations, Herr General! You have completed this campaign path.");
+        msg.append("Completed on Turn ").append(completedTurn).append(" of ").append(engine.maxTurns).append("\n");
+        if (step.bonusPrestige > 0 || outcome <= 2) {
+            msg.append("Prestige Awarded: +").append(step.bonusPrestige).append("\n");
+        }
+        msg.append("\n");
+
+        if (engine.isCampaignMode && !step.outcomeBriefingText.isEmpty()) {
+            msg.append(step.outcomeBriefingText).append("\n\n");
+        }
+
+        if (engine.isCampaignMode) {
+            if (step.requiresPlayerChoice()) {
+                msg.append("High Command Strategic Directive: Choose your next theater of operations.");
+            } else if (step.hasNextScenario()) {
+                PgCampaignManager.BranchOption nextOpt = step.options.get(0);
+                msg.append("Next Campaign Assignment: #").append(nextOpt.scenarioNumber)
+                   .append(" ").append(nextOpt.scenarioTitle);
+            } else if (step.outcomeBriefingText.isEmpty()) {
+                if (step.endType == PgCampaignManager.CampaignEndType.DEFEAT) {
+                    msg.append("High Command has relieved you of command.");
+                } else {
+                    msg.append("Congratulations, Herr General! You have completed the campaign.");
+                }
+            }
         } else {
-            msg.append("High Command has relieved you of command.");
+            msg.append(outcome <= 2
+                    ? "Congratulations, Herr General! Scenario objectives achieved."
+                    : "Scenario objectives were not met.");
         }
 
         AlertDialog.Builder b = new AlertDialog.Builder(this);
         b.setTitle(title);
         b.setMessage(msg.toString());
         b.setCancelable(false);
-        if (engine.isCampaignMode && nextScenNum > 0 && outcome <= 2) {
-            b.setPositiveButton("Advance to " + nextScenKey, (d, w) -> {
-                try {
-                    engine.axisPrestige += bonusPrestige;
-                    engine.loadScenario(nextScenNum, true);
-                    launchTacticalScreen();
-                } catch (IOException e) {
-                    Toast.makeText(this, "Error loading next scenario", Toast.LENGTH_SHORT).show();
-                }
+        if (engine.isCampaignMode && step.hasNextScenario()) {
+            if (step.requiresPlayerChoice()) {
+                b.setPositiveButton("High Command Orders...", (d, w) -> {
+                    sounds.playSelect();
+                    showCampaignChoiceDialog(step);
+                });
+            } else {
+                PgCampaignManager.BranchOption nextOpt = step.options.get(0);
+                b.setPositiveButton("Advance to " + nextOpt.scenarioTitle, (d, w) -> {
+                    sounds.playSelect();
+                    advanceCampaignWithOption(step, nextOpt);
+                });
+            }
+            b.setNegativeButton("Main Menu", (d, w) -> {
+                titleOverlay.setVisibility(View.VISIBLE);
+            });
+        } else {
+            b.setPositiveButton("Main Menu", (d, w) -> {
+                titleOverlay.setVisibility(View.VISIBLE);
             });
         }
+        b.show();
+    }
+
+    private void showCampaignChoiceDialog(PgCampaignManager.CampaignStepResult step) {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(36, 24, 36, 16);
+
+        TextView tvBrief = new TextView(this);
+        StringBuilder info = new StringBuilder();
+        if (!step.choiceBriefingText.isEmpty()) {
+            info.append(step.choiceBriefingText).append("\n\n");
+        } else {
+            info.append("High Command offers you a strategic choice for your next operation.\n\n");
+        }
+        info.append("Available Prestige Treasury: ").append(engine.axisPrestige + step.bonusPrestige);
+        tvBrief.setText(info.toString());
+        tvBrief.setTextSize(15f);
+        tvBrief.setPadding(0, 0, 0, 20);
+        container.addView(tvBrief);
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("High Command Strategic Directive");
+        b.setView(scroll);
+        b.setCancelable(false);
         b.setNegativeButton("Main Menu", (d, w) -> {
             titleOverlay.setVisibility(View.VISIBLE);
         });
-        b.show();
+        scroll.addView(container);
+        AlertDialog dlg = b.create();
+
+        for (PgCampaignManager.BranchOption opt : step.options) {
+            Button btn = new Button(this);
+            btn.setAllCaps(false);
+            btn.setText("#" + opt.scenarioNumber + "  " + opt.optionLabel);
+            btn.setTextSize(14.5f);
+            btn.setTypeface(Typeface.DEFAULT_BOLD);
+            btn.setTextColor(Color.parseColor("#FFF4D2"));
+            btn.setPadding(24, 22, 24, 22);
+
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(Color.parseColor("#2E3B27"));
+            bg.setCornerRadius(10f);
+            bg.setStroke(2, Color.parseColor("#C5A059"));
+            btn.setBackground(bg);
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, 0, 0, 14);
+            btn.setLayoutParams(lp);
+
+            btn.setOnClickListener(v -> {
+                sounds.playSelect();
+                dlg.dismiss();
+                advanceCampaignWithOption(step, opt);
+            });
+            container.addView(btn);
+        }
+
+        dlg.show();
+    }
+
+    private void advanceCampaignWithOption(PgCampaignManager.CampaignStepResult step,
+                                           PgCampaignManager.BranchOption chosen) {
+        try {
+            engine.commitCampaignTransition(step, chosen);
+            launchTacticalScreen();
+        } catch (IOException e) {
+            Toast.makeText(this, "Error loading next scenario: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showBriefingDialog() {
@@ -1587,8 +1699,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         if (!m.briefingText.equals(m.description)) {
             sb.append(m.briefingText).append("\n\n");
         }
-        sb.append("• Turns Allowed: ").append(engine.maxTurns)
-          .append(" (Decisive Victory within ").append(engine.maxTurns - m.decisiveTurnsRemaining).append(" turns)\n");
+        sb.append("• Turns Allowed: ").append(engine.maxTurns);
+        if (m.decisiveTurnsRemaining > 0) {
+            sb.append(" (Major Victory within ").append(engine.maxTurns - m.decisiveTurnsRemaining).append(" turns)\n");
+        } else if (engine.scenario.isDefensiveScenario) {
+            sb.append(" (Defensive Operation — Hold Required Objectives)\n");
+        } else {
+            sb.append("\n");
+        }
         sb.append("• Victory Objectives (").append(engine.scenario.objectives.size()).append("): ");
         for (int i = 0; i < engine.scenario.objectives.size(); i++) {
             int[] oc = engine.scenario.objectives.get(i);

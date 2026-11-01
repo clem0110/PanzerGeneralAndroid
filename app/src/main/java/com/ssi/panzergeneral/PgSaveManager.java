@@ -48,6 +48,9 @@ public class PgSaveManager {
                 .hexOwners(hexOwners)
                 .scenarioTitle(engine.scenario.meta != null ? engine.scenario.meta.fullTitle : "Panzer General Battle")
                 .saveTimestamp(saveTimestamp)
+                .westDefeated(engine.westDefeated)
+                .eastDefeated(engine.eastDefeated)
+                .lowCountriesLost(engine.lowCountriesLost)
                 .build();
 
         ObjectOutputStream oos = new ObjectOutputStream(os);
@@ -100,6 +103,9 @@ public class PgSaveManager {
             PgGameEngine.SaveState st = (PgGameEngine.SaveState) ois.readObject();
             engine.isCampaignMode = st.isCampaign;
             engine.campaignIndex = st.campaignEntryIndex;
+            engine.westDefeated = st.westDefeated;
+            engine.eastDefeated = st.eastDefeated;
+            engine.lowCountriesLost = st.lowCountriesLost;
             engine.scenario = db.loadScenario(st.currentScenarioNumber);
             engine.currentScenarioNumber = st.currentScenarioNumber;
             engine.turn = st.turn;
