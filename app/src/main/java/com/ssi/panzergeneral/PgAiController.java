@@ -40,7 +40,7 @@ public class PgAiController {
         int nearbyAxisAir = 0;
 
         for (PgDatabase.ActiveUnit ax : engine.units) {
-            if (ax != null && ax.isAxis && ax.strength > 0) {
+            if (ax != null && engine.isPlayerUnit(ax) && ax.strength > 0) {
                 int dist = PgGameEngine.hexDistance(col, row, ax.col, ax.row);
                 if (dist < minAxisDist) minAxisDist = dist;
                 PgDatabase.UnitDef axDef = db.equipment.get(ax.unitDefId);
@@ -99,7 +99,7 @@ public class PgAiController {
                 for (int[] nb : engine.getNeighbors(col, row)) {
                     if (nb[0] >= 0 && nb[0] < engine.scenario.cols && nb[1] >= 0 && nb[1] < engine.scenario.rows) {
                         PgDatabase.ActiveUnit nbU = engine.getUnitAt(nb[0], nb[1], false);
-                        if (nbU != null && !nbU.isAxis) {
+                        if (nbU != null && engine.isAiUnit(nbU)) {
                             adjacentToFriendlyDefender = true;
                             if (engine.scenario.grid[nb[0]][nb[1]].isObjective) {
                                 score += 70.0; // Supporting an objective garrison!
@@ -177,16 +177,16 @@ public class PgAiController {
     }
 
     public boolean takeAiReplacements(PgDatabase.ActiveUnit u) {
-        if (u == null || u.strength >= 10 || engine.alliedPrestige < 20) return false;
+        if (u == null || u.strength >= 10 || engine.getAiPrestige() < 20) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         int needed = 10 - u.strength;
         int costPerPoint = Math.max(5, def.cost / 15);
         int cost = needed * costPerPoint;
-        if (engine.alliedPrestige < cost) {
-            cost = engine.alliedPrestige;
+        if (engine.getAiPrestige() < cost) {
+            cost = engine.getAiPrestige();
             needed = Math.max(1, cost / costPerPoint);
         }
-        engine.alliedPrestige -= cost;
+        engine.addAiPrestige(-cost);
         u.strength += needed;
         u.moved = true;
         u.attacked = true;
@@ -288,7 +288,7 @@ public class PgAiController {
 
         // Reset AI units & clear suppression
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u != null && !u.isAxis && u.strength > 0) {
+            if (u != null && engine.isAiUnit(u) && u.strength > 0) {
                 u.movePointsUsed = 0;
                 u.moved = false;
                 u.attacked = false;
@@ -301,7 +301,7 @@ public class PgAiController {
 
         List<PgDatabase.ActiveUnit> aiList = new ArrayList<>();
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u != null && !u.isAxis && u.strength > 0) aiList.add(u);
+            if (u != null && engine.isAiUnit(u) && u.strength > 0) aiList.add(u);
         }
 
         // Identify strategic objective locations on the map
@@ -319,7 +319,7 @@ public class PgAiController {
                             boolean threatened = (occupant == null);
                             if (!threatened) {
                                 for (PgDatabase.ActiveUnit au : engine.units) {
-                                    if (au != null && au.isAxis && au.strength > 0 && PgGameEngine.hexDistance(c, r, au.col, au.row) <= 4) {
+                                    if (au != null && engine.isPlayerUnit(au) && au.strength > 0 && PgGameEngine.hexDistance(c, r, au.col, au.row) <= 4) {
                                         threatened = true;
                                         break;
                                     }
@@ -328,7 +328,7 @@ public class PgAiController {
                             if (threatened) threatenedAlliedObjectives.add(cell);
                         } else {
                             // Axis objective: check if no Axis ground unit defends it
-                            if (occupant == null || !occupant.isAxis) {
+                            if (occupant == null || !engine.isPlayerUnit(occupant)) {
                                 capturableAxisObjectives.add(cell);
                             }
                         }
@@ -369,7 +369,7 @@ public class PgAiController {
                 int bestAc = -1, bestAr = -1, minAirDist = 999;
                 for (int c = 0; c < engine.scenario.cols; c++) {
                     for (int r = 0; r < engine.scenario.rows; r++) {
-                        if (engine.scenario.grid[c][r].terrainType == 6 && !db.isAxisNation(engine.scenario.grid[c][r].ownerNation, engine.scenario)) {
+                        if (engine.scenario.grid[c][r].terrainType == 6 && engine.isAiOwnedHex(engine.scenario.grid[c][r])) {
                             int d = PgGameEngine.hexDistance(ai.col, ai.row, c, r);
                             if (d < minAirDist) {
                                 minAirDist = d;
@@ -418,7 +418,7 @@ public class PgAiController {
                     int bestPriority = -1;
                     int closestDist = 999;
                     for (PgDatabase.ActiveUnit eu : engine.units) {
-                        if (eu != null && eu.isAxis && eu.strength > 0 && engine.isUnitOnAirLayer(eu)) {
+                        if (eu != null && engine.isPlayerUnit(eu) && eu.strength > 0 && engine.isUnitOnAirLayer(eu)) {
                             PgDatabase.UnitDef eDef = db.equipment.get(eu.unitDefId);
                             int prio = (eDef.unitClass == PgDatabase.CLASS_LEVEL_BOMBER || eDef.unitClass == PgDatabase.CLASS_TAC_BOMBER) ? 2 : 1;
                             int d = PgGameEngine.hexDistance(ai.col, ai.row, eu.col, eu.row);
@@ -432,7 +432,7 @@ public class PgAiController {
                     // If no enemy aircraft, search for nearest Axis ground force to patrol
                     if (airTarget == null) {
                         for (PgDatabase.ActiveUnit eu : engine.units) {
-                            if (eu != null && eu.isAxis && eu.strength > 0) {
+                            if (eu != null && engine.isPlayerUnit(eu) && eu.strength > 0) {
                                 int d = PgGameEngine.hexDistance(ai.col, ai.row, eu.col, eu.row);
                                 if (d < closestDist) {
                                     closestDist = d;
@@ -492,7 +492,7 @@ public class PgAiController {
                     PgDatabase.ActiveUnit groundTarget = null;
                     int bestScore = -999;
                     for (PgDatabase.ActiveUnit eu : engine.units) {
-                        if (eu != null && eu.isAxis && eu.strength > 0 && !engine.isUnitOnAirLayer(eu)) {
+                        if (eu != null && engine.isPlayerUnit(eu) && eu.strength > 0 && !engine.isUnitOnAirLayer(eu)) {
                             PgDatabase.UnitDef eDef = db.equipment.get(eu.unitDefId);
                             int targetVal = 10;
                             if (eDef.unitClass == PgDatabase.CLASS_TANK) targetVal = 25;
@@ -581,7 +581,7 @@ public class PgAiController {
                 PgDatabase.ActiveUnit nearestEnemy = null;
                 int minEnemyDist = 999;
                 for (PgDatabase.ActiveUnit eu : engine.units) {
-                    if (eu != null && eu.isAxis && eu.strength > 0 && !engine.isUnitOnAirLayer(eu)) {
+                    if (eu != null && engine.isPlayerUnit(eu) && eu.strength > 0 && !engine.isUnitOnAirLayer(eu)) {
                         int d = PgGameEngine.hexDistance(ai.col, ai.row, eu.col, eu.row);
                         if (d < minEnemyDist) {
                             minEnemyDist = d;
@@ -604,7 +604,7 @@ public class PgAiController {
                         boolean anyAdj = false;
                         for (int[] nb : engine.getNeighbors(mc, mr)) {
                             PgDatabase.ActiveUnit adj = engine.getUnitAt(nb[0], nb[1], false);
-                            if (adj != null && adj.isAxis && adj.strength > 0) {
+                            if (adj != null && engine.isPlayerUnit(adj) && adj.strength > 0) {
                                 anyAdj = true;
                                 break;
                             }
@@ -681,7 +681,7 @@ public class PgAiController {
             PgDatabase.ActiveUnit nearestThreat = null;
             int minThreatDist = 999;
             for (PgDatabase.ActiveUnit eu : engine.units) {
-                if (eu != null && eu.isAxis && eu.strength > 0) {
+                if (eu != null && engine.isPlayerUnit(eu) && eu.strength > 0) {
                     int d = PgGameEngine.hexDistance(ai.col, ai.row, eu.col, eu.row);
                     if (d < minThreatDist) {
                         minThreatDist = d;
@@ -723,13 +723,13 @@ public class PgAiController {
         // PHASE 8: Replacements for Safe Wounded AI Units
         // =========================================================================
         for (PgDatabase.ActiveUnit ai : aiList) {
-            if (ai.strength > 0 && ai.strength <= 7 && !ai.attacked && engine.alliedPrestige >= 25 && engine.scenario != null) {
+            if (ai.strength > 0 && ai.strength <= 7 && !ai.attacked && engine.getAiPrestige() >= 25 && engine.scenario != null) {
                 PgDatabase.HexCell cell = engine.scenario.grid[ai.col][ai.row];
                 boolean isSupply = cell.isSupplyPoint() || cell.isObjective || cell.terrainType == 8;
                 boolean safeFromEnemy = true;
                 for (int[] nb : engine.getNeighbors(ai.col, ai.row)) {
                     PgDatabase.ActiveUnit adj = engine.getUnitAt(nb[0], nb[1], false);
-                    if (adj != null && adj.isAxis && adj.strength > 0) {
+                    if (adj != null && engine.isPlayerUnit(adj) && adj.strength > 0) {
                         safeFromEnemy = false;
                         break;
                     }
@@ -744,11 +744,12 @@ public class PgAiController {
         // PHASE 9: Smart AI Reinforcements / Prestige Spending
         // Allow multiple purchases per turn as long as AI has prestige, placing units where most effective
         // =========================================================================
-        if (engine.scenario != null && engine.alliedPrestige >= 50) {
+        if (engine.scenario != null && engine.getAiPrestige() >= 50) {
             List<PgDatabase.UnitDef> candidateDefs = new ArrayList<>();
             Set<Integer> seenDefIds = new HashSet<>();
             for (PgDatabase.ActiveUnit initU : engine.scenario.initialUnits) {
-                if (!initU.isAxis && initU.unitDefId > 0 && initU.unitDefId < db.equipment.size()) {
+                if (initU != null && initU.unitDefId > 0 && initU.unitDefId < db.equipment.size()
+                        && (initU.isAxis == !engine.playerIsAxis || db.isUnitBelongsToSide(db.equipment.get(initU.unitDefId), !engine.playerIsAxis, engine.scenario))) {
                     if (seenDefIds.add(initU.unitDefId)) {
                         PgDatabase.UnitDef d = db.equipment.get(initU.unitDefId);
                         if (d != null && !d.isNaval() && !d.isFortification()
@@ -775,7 +776,7 @@ public class PgAiController {
 
             int tankCount = 0, infCount = 0, artyCount = 0, atCount = 0, aaCount = 0, airCount = 0;
             for (PgDatabase.ActiveUnit u : engine.units) {
-                if (u != null && !u.isAxis && u.strength > 0) {
+                if (u != null && engine.isAiUnit(u) && u.strength > 0) {
                     PgDatabase.UnitDef d = db.equipment.get(u.unitDefId);
                     if (d.unitClass == PgDatabase.CLASS_TANK) tankCount++;
                     else if (d.unitClass == PgDatabase.CLASS_INFANTRY) infCount++;
@@ -792,11 +793,11 @@ public class PgAiController {
             while (purchasesDone < maxPurchasesThisTurn) {
                 int minAffordableCost = Integer.MAX_VALUE;
                 for (PgDatabase.UnitDef d : candidateDefs) {
-                    if (d.cost <= engine.alliedPrestige && d.cost < minAffordableCost) {
+                    if (d.cost <= engine.getAiPrestige() && d.cost < minAffordableCost) {
                         minAffordableCost = d.cost;
                     }
                 }
-                if (minAffordableCost > engine.alliedPrestige) {
+                if (minAffordableCost > engine.getAiPrestige()) {
                     break;
                 }
 
@@ -808,7 +809,7 @@ public class PgAiController {
                 List<int[]> airSpots = engine.getAvailableAiDeployHexes(true);
 
                 for (PgDatabase.UnitDef d : candidateDefs) {
-                    if (d.cost > engine.alliedPrestige) continue;
+                    if (d.cost > engine.getAiPrestige()) continue;
                     List<int[]> spots = d.isAir() ? airSpots : groundSpots;
                     if (spots.isEmpty()) continue;
 
@@ -859,7 +860,7 @@ public class PgAiController {
         if (ai.transportDefId > 0 && !ai.moved && ai.movePointsUsed == 0) {
             boolean nearEnemy = false;
             for (PgDatabase.ActiveUnit e : engine.units) {
-                if (e != null && e.isAxis && e.strength > 0 && PgGameEngine.hexDistance(ai.col, ai.row, e.col, e.row) <= 2) {
+                if (e != null && engine.isPlayerUnit(e) && e.strength > 0 && PgGameEngine.hexDistance(ai.col, ai.row, e.col, e.row) <= 2) {
                     nearEnemy = true;
                     break;
                 }
@@ -921,7 +922,7 @@ public class PgAiController {
             PgDatabase.ActiveUnit nearestEnemy = null;
             int minEnemyDist = 999;
             for (PgDatabase.ActiveUnit eu : engine.units) {
-                if (eu != null && eu.isAxis && eu.strength > 0 && !engine.isUnitOnAirLayer(eu)) {
+                if (eu != null && engine.isPlayerUnit(eu) && eu.strength > 0 && !engine.isUnitOnAirLayer(eu)) {
                     int d = PgGameEngine.hexDistance(ai.col, ai.row, eu.col, eu.row);
                     if (d < minEnemyDist) {
                         minEnemyDist = d;
@@ -940,9 +941,9 @@ public class PgAiController {
                 double score = 0.0;
 
                 // Huge reward for capturing an objective!
-                if (destCell.isObjective && db.isAxisNation(destCell.ownerNation, engine.scenario)) {
+                if (destCell.isObjective && engine.isPlayerOwnedHex(destCell)) {
                     score += 100.0;
-                } else if (destCell.isObjective && !db.isAxisNation(destCell.ownerNation, engine.scenario)) {
+                } else if (destCell.isObjective && engine.isAiOwnedHex(destCell)) {
                     score += 25.0; // Garrisoning friendly objective
                 }
 
@@ -968,7 +969,7 @@ public class PgAiController {
                 List<PgDatabase.ActiveUnit> adjEnemies = new ArrayList<>();
                 for (int[] nb : engine.getNeighbors(mc, mr)) {
                     PgDatabase.ActiveUnit adjEnemy = engine.getUnitAt(nb[0], nb[1], false);
-                    if (adjEnemy != null && adjEnemy.isAxis && adjEnemy.strength > 0) {
+                    if (adjEnemy != null && engine.isPlayerUnit(adjEnemy) && adjEnemy.strength > 0) {
                         adjEnemies.add(adjEnemy);
                     }
                 }

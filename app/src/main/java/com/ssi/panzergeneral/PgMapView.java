@@ -214,7 +214,8 @@ public class PgMapView extends View {
 
     public void showYourTurnBanner(int currentTurn, int maxTurns, String weatherLabel) {
         this.turnBannerTitle = String.format(Locale.ROOT, "★ YOUR TURN — TURN %d / %d ★", currentTurn, maxTurns);
-        this.turnBannerSubtitle = "Axis Forces Ready For Orders • " + (weatherLabel != null ? weatherLabel : "Clear / Dry");
+        String sideStr = (engine != null && !engine.playerIsAxis) ? "Allied" : "Axis";
+        this.turnBannerSubtitle = sideStr + " Forces Ready For Orders • " + (weatherLabel != null ? weatherLabel : "Clear / Dry");
         this.turnBannerExpireTime = System.currentTimeMillis() + 3800;
         invalidate();
     }
@@ -308,7 +309,7 @@ public class PgMapView extends View {
         selectedCol = u.col;
         selectedRow = u.row;
         selectedUnit = u;
-        if (u.isAxis && engine.isPlayerTurn && !engine.isDeploymentPhase) {
+        if (engine.isPlayerUnit(u) && engine.isPlayerTurn && !engine.isDeploymentPhase) {
             reachableHexes = engine.getReachableHexes(u);
             validTargets = engine.getValidTargets(u);
         } else {
@@ -391,7 +392,7 @@ public class PgMapView extends View {
                     sounds.playCombatSound(aDef);
                     triggerExplosion(rep.targetCol, rep.targetRow, rep);
                     if (attacker != null && attacker.strength > 0) {
-                        if (rep.overrun && attacker.isAxis && engine.isPlayerTurn) {
+                        if (rep.overrun && engine.isPlayerUnit(attacker) && engine.isPlayerTurn) {
                             awaitingOverrunPrompt = true;
                             selectedCol = attacker.col;
                             selectedRow = attacker.row;
@@ -419,7 +420,7 @@ public class PgMapView extends View {
             sounds.playCombatSound(aDef);
             triggerExplosion(rep.targetCol, rep.targetRow, rep);
             if (attacker != null && attacker.strength > 0) {
-                if (rep.overrun && attacker.isAxis && engine.isPlayerTurn) {
+                if (rep.overrun && engine.isPlayerUnit(attacker) && engine.isPlayerTurn) {
                     awaitingOverrunPrompt = true;
                     selectedCol = attacker.col;
                     selectedRow = attacker.row;
@@ -578,7 +579,7 @@ public class PgMapView extends View {
         }
 
         // 1. Check if tapping a valid attack target for currently selected friendly unit
-        if (selectedUnit != null && selectedUnit.isAxis && engine.isPlayerTurn) {
+        if (selectedUnit != null && engine.isPlayerUnit(selectedUnit) && engine.isPlayerTurn) {
             for (PgDatabase.ActiveUnit target : validTargets) {
                 if (target.col == col && target.row == row) {
                     PgGameEngine.CombatReport rep = engine.executeCombat(selectedUnit, target);
@@ -650,7 +651,7 @@ public class PgMapView extends View {
             PgDatabase.ActiveUnit alt = engine.getUnitAt(col, row, !engine.isUnitOnAirLayer(tappedUnit));
             if (alt != null) {
                 // If one unit belongs to the player (Axis) and the other is enemy, prioritize selecting player's unit
-                if (!tappedUnit.isAxis && alt.isAxis) {
+                if (!engine.isPlayerUnit(tappedUnit) && engine.isPlayerUnit(alt)) {
                     tappedUnit = alt;
                 }
             }
@@ -982,7 +983,7 @@ public class PgMapView extends View {
 
         Bitmap unitBmp = assets.getSprite("TACICONS.SHP", iconIdx, u.facingLeft);
         if (unitBmp != null) {
-            bitmapPaint.setAlpha(dimmed ? 160 : (u.moved && u.attacked && u.isAxis ? 195 : 255));
+            bitmapPaint.setAlpha(dimmed ? 160 : (u.moved && u.attacked && engine.isPlayerUnit(u) ? 195 : 255));
             canvas.drawBitmap(unitBmp, x, y, bitmapPaint);
             bitmapPaint.setAlpha(255);
         }
@@ -1050,7 +1051,7 @@ public class PgMapView extends View {
         }
 
         // Action readiness dot for Axis player units
-        if (u.isAxis && engine.isPlayerTurn && (!u.moved || !u.attacked)) {
+        if (engine.isPlayerUnit(u) && engine.isPlayerTurn && (!u.moved || !u.attacked)) {
             badgePaint.setColor(!u.moved ? 0xFF00E676 : 0xFFFFC400);
             canvas.drawCircle(x + 15f, y + 42f, 3.2f, badgePaint);
         }
@@ -1225,7 +1226,8 @@ public class PgMapView extends View {
         textPaint.setTextSize(20f);
         textPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         textPaint.setShadowLayer(3f, 1f, 1f, Color.BLACK);
-        canvas.drawText("\u2605 ALLIED TURN IN PROGRESS \u2605", bx + bw * 0.5f, by + 31f, textPaint);
+        String enemySide = (engine != null && !engine.playerIsAxis) ? "AXIS" : "ALLIED";
+        canvas.drawText("\u2605 " + enemySide + " TURN IN PROGRESS \u2605", bx + bw * 0.5f, by + 31f, textPaint);
     }
 
     private void drawStrategicMap(Canvas canvas) {
@@ -1270,8 +1272,8 @@ public class PgMapView extends View {
                 canvas.drawRect(cx, cy, cx + cellW - 0.5f, cy + cellW - 0.5f, badgePaint);
 
                 if (cell.isObjective) {
-                    boolean axisOwned = engine.db.isAxisNation(cell.ownerNation, engine.scenario);
-                    badgePaint.setColor(axisOwned ? 0xFFFFD700 : 0xFFFF3D00);
+                    boolean playerOwned = engine.isPlayerOwnedHex(cell);
+                    badgePaint.setColor(playerOwned ? 0xFFFFD700 : 0xFFFF3D00);
                     canvas.drawCircle(cx + cellW * 0.5f, cy + cellW * 0.5f, Math.max(4f, cellW * 0.45f), badgePaint);
                 }
             }

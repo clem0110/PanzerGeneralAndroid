@@ -17,7 +17,7 @@ public class PgLogisticsManager {
     }
 
     public boolean hasAvailableAction(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || u.strength <= 0 || !engine.isPlayerTurn) return false;
+        if (u == null || !engine.isPlayerUnit(u) || u.strength <= 0 || !engine.isPlayerTurn) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def == null) return false;
 
@@ -70,7 +70,7 @@ public class PgLogisticsManager {
 
     public boolean canResupplyUnit(PgDatabase.ActiveUnit u) {
         if (!engine.supplyEnabled || engine.isDeploymentPhase || engine.scenario == null) return false;
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0) return false;
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0) return false;
         if (u.moved || u.movePointsUsed > 0 || u.attacked) return false;
         if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
@@ -104,7 +104,7 @@ public class PgLogisticsManager {
     }
 
     public boolean canReinforceUnit(PgDatabase.ActiveUnit u, boolean elite) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0) {
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0) {
             return false;
         }
         if (!engine.isDeploymentPhase && (u.moved || u.movePointsUsed > 0 || u.attacked)) {
@@ -116,7 +116,7 @@ public class PgLogisticsManager {
         int costPerPoint = (u.strength >= 10)
                 ? Math.max(20, def.cost / 5)
                 : Math.max(8, def.cost / (elite ? 10 : 20));
-        if (engine.axisPrestige < costPerPoint) {
+        if (engine.getPlayerPrestige() < costPerPoint) {
             return false;
         }
 
@@ -158,10 +158,10 @@ public class PgLogisticsManager {
             costPerPoint = Math.max(8, def.cost / (elite ? 10 : 20));
         }
 
-        int affordable = Math.min(needed, engine.axisPrestige / costPerPoint);
+        int affordable = Math.min(needed, engine.getPlayerPrestige() / costPerPoint);
         if (affordable <= 0) return false;
 
-        engine.axisPrestige -= affordable * costPerPoint;
+        engine.addPlayerPrestige(-affordable * costPerPoint);
         if (!elite) {
             u.experience = (u.experience * u.strength) / (u.strength + affordable);
         }
@@ -180,7 +180,7 @@ public class PgLogisticsManager {
 
     // Panzer General Manual: Ground units upgrade only on a friendly controlled City (Air units on a friendly controlled Airfield) with no adjacent enemies
     public boolean canUpgradeUnit(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) {
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) {
             return false;
         }
         if (!engine.isDeploymentPhase && (u.moved || u.movePointsUsed > 0 || u.attacked)) {
@@ -195,7 +195,7 @@ public class PgLogisticsManager {
                 || def.unitClass == PgDatabase.CLASS_ANTI_AIR
                 || def.unitClass == PgDatabase.CLASS_AIR_DEFENSE);
         int minPrestige = supportsTransport ? 10 : 20;
-        if (engine.axisPrestige < minPrestige) return false;
+        if (engine.getPlayerPrestige() < minPrestige) return false;
         if (u.col < 0 || u.row < 0) {
             return engine.isDeploymentPhase;
         }
@@ -203,9 +203,9 @@ public class PgLogisticsManager {
         if (engine.deploymentManager.hasEnemyAdjacentOrOnHex(u.col, u.row, u.isAxis)) return false;
         PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
         if (def.isAir()) {
-            return cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, engine.scenario);
+            return cell.terrainType == 6 && (db.isAxisNation(cell.ownerNation, engine.scenario) == u.isAxis);
         }
-        return cell.terrainType == 8 && db.isAxisNation(cell.ownerNation, engine.scenario);
+        return cell.terrainType == 8 && (db.isAxisNation(cell.ownerNation, engine.scenario) == u.isAxis);
     }
 
     public int getUpgradeCost(PgDatabase.ActiveUnit u, int newUnitDefId, int newTransportDefId) {
@@ -231,9 +231,9 @@ public class PgLogisticsManager {
         }
         PgDatabase.UnitDef newDef = db.equipment.get(newUnitDefId);
         int upgradeCost = getUpgradeCost(u, newUnitDefId, newTransportDefId);
-        if (engine.axisPrestige < upgradeCost) return false;
+        if (engine.getPlayerPrestige() < upgradeCost) return false;
 
-        engine.axisPrestige -= upgradeCost;
+        engine.addPlayerPrestige(-upgradeCost);
         u.unitDefId = newUnitDefId;
         u.transportDefId = newTransportDefId;
         u.strength = Math.min(u.getMaxOverstrength(), u.strength);
@@ -252,7 +252,7 @@ public class PgLogisticsManager {
 
     // Panzer General Manual: Disband unmoved/unattacked Unit to recover Prestige
     public boolean canDisbandUnit(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0) return false;
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0) return false;
         if (!engine.isDeploymentPhase && (u.moved || u.movePointsUsed > 0 || u.attacked)) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         return def != null && !def.isFortification();
@@ -271,7 +271,7 @@ public class PgLogisticsManager {
     public int disbandUnit(PgDatabase.ActiveUnit u) {
         if (!canDisbandUnit(u)) return 0;
         int refund = getDisbandRefund(u);
-        engine.axisPrestige += refund;
+        engine.addPlayerPrestige(refund);
         engine.units.remove(u);
         engine.unplacedCoreUnits.remove(u);
         engine.coreUnits.remove(u);

@@ -51,6 +51,7 @@ public class PgSaveManager {
                 .westDefeated(engine.westDefeated)
                 .eastDefeated(engine.eastDefeated)
                 .lowCountriesLost(engine.lowCountriesLost)
+                .playerPlayingAllied(!engine.playerIsAxis)
                 .build();
 
         ObjectOutputStream oos = new ObjectOutputStream(os);
@@ -102,6 +103,7 @@ public class PgSaveManager {
         try (ObjectInputStream ois = new ObjectInputStream(is)) {
             PgGameEngine.SaveState st = (PgGameEngine.SaveState) ois.readObject();
             engine.isCampaignMode = st.isCampaign;
+            engine.playerIsAxis = !st.playerPlayingAllied;
             engine.campaignIndex = st.campaignEntryIndex;
             engine.westDefeated = st.westDefeated;
             engine.eastDefeated = st.eastDefeated;

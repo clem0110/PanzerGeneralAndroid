@@ -90,6 +90,7 @@ public class PgCampaignManager {
 
     public void startCampaign(int campIdx) throws IOException {
         engine.isCampaignMode = true;
+        engine.playerIsAxis = true;
         engine.campaignIndex = campIdx;
         engine.westDefeated = false;
         engine.eastDefeated = false;
@@ -101,6 +102,11 @@ public class PgCampaignManager {
     }
 
     public void startSingleScenario(int scenNum) throws IOException {
+        startSingleScenario(scenNum, true);
+    }
+
+    public void startSingleScenario(int scenNum, boolean playAsAxis) throws IOException {
+        engine.playerIsAxis = playAsAxis;
         engine.isCampaignMode = false;
         engine.westDefeated = false;
         engine.eastDefeated = false;
@@ -133,12 +139,17 @@ public class PgCampaignManager {
         engine.lastUndoState = null;
         engine.lastSurpriseReport = null;
 
-        if (!carryOverCore) {
-            engine.axisPrestige = (engine.scenario.meta.axisPrestige * engine.prestigeModifier) / 100;
+        if (engine.playerIsAxis) {
+            if (!carryOverCore) {
+                engine.axisPrestige = (engine.scenario.meta.axisPrestige * engine.prestigeModifier) / 100;
+            } else {
+                engine.axisPrestige += (Math.max(250, engine.scenario.meta.axisPrestige / 2) * engine.prestigeModifier) / 100;
+            }
+            engine.alliedPrestige = engine.scenario.meta.alliedPrestige;
         } else {
-            engine.axisPrestige += (Math.max(250, engine.scenario.meta.axisPrestige / 2) * engine.prestigeModifier) / 100;
+            engine.alliedPrestige = (engine.scenario.meta.alliedPrestige * engine.prestigeModifier) / 100;
+            engine.axisPrestige = engine.scenario.meta.axisPrestige;
         }
-        engine.alliedPrestige = engine.scenario.meta.alliedPrestige;
 
         engine.units.clear();
         engine.unplacedCoreUnits.clear();
@@ -153,6 +164,7 @@ public class PgCampaignManager {
         for (PgDatabase.ActiveUnit u : engine.scenario.initialUnits) {
             if (u == null) continue;
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+            if (!engine.playerIsAxis && !engine.isCampaignMode && !u.isAxis && !def.isNaval()) { u.isCore = true; }
             if (hasExistingCoreArmy && u.isAxis && u.isCore) {
                 if (def != null && def.isNaval()) {
                     // Naval units cannot be bought or carried over in campaign; supply them as scenario auxiliaries!
@@ -253,7 +265,7 @@ public class PgCampaignManager {
                 int maxEnt = engine.scenario.grid[u.col][u.row].getBaseEntrenchment() + 3;
                 if (u.entrenchment < maxEnt) u.entrenchment++;
             }
-            if (u.isAxis) {
+            if (engine.isPlayerUnit(u)) {
                 u.movePointsUsed = 0;
                 u.moved = false;
                 u.attacked = false;
@@ -264,11 +276,11 @@ public class PgCampaignManager {
                     u.ammo = def.maxAmmo > 0 ? def.maxAmmo : 99;
                 } else if (def.isAir()) {
                     boolean onFriendlyAirfield = (engine.scenario.grid[u.col][u.row].terrainType == 6
-                            && db.isAxisNation(engine.scenario.grid[u.col][u.row].ownerNation, engine.scenario));
+                            && (db.isAxisNation(engine.scenario.grid[u.col][u.row].ownerNation, engine.scenario) == u.isAxis));
                     boolean nearCarrier = false;
                     for (int[] nb : engine.getNeighbors(u.col, u.row)) {
                         PgDatabase.ActiveUnit sea = engine.getUnitAt(nb[0], nb[1], false);
-                        if (sea != null && sea.isAxis && sea.unitDefId > 0 && sea.unitDefId < db.equipment.size()
+                        if (sea != null && sea.isAxis == u.isAxis && sea.unitDefId > 0 && sea.unitDefId < db.equipment.size()
                                 && db.equipment.get(sea.unitDefId).unitClass == PgDatabase.CLASS_CARRIER) {
                             nearCarrier = true;
                             break;
@@ -336,170 +348,159 @@ public class PgCampaignManager {
     public void checkVictoryConditions() {
         if (engine.scenario == null || engine.scenario.objectives.isEmpty()) return;
         boolean allAxis = true;
+        boolean allAllied = true;
         int axisCount = 0;
+        int alliedCount = 0;
         for (int[] obj : engine.scenario.objectives) {
             if (axisOwnsHex(obj[0], obj[1])) {
                 axisCount++;
+                allAllied = false;
             } else {
+                alliedCount++;
                 allAxis = false;
             }
         }
 
+        int axisOutcome = evaluateAxisOutcome(allAxis, axisCount);
+        if (engine.playerIsAxis) {
+            engine.scenarioOutcome = axisOutcome;
+        } else {
+            // Player is playing ALLIED
+            if (allAllied) {
+                int turnsLeft = engine.maxTurns - engine.turn;
+                engine.scenarioOutcome = (turnsLeft >= engine.scenario.meta.decisiveTurnsRemaining) ? 1 : 2;
+            } else if (allAxis) {
+                engine.scenarioOutcome = 3;
+            } else if (engine.turn > engine.maxTurns) {
+                if (axisOutcome == 1 || axisOutcome == 2) {
+                    engine.scenarioOutcome = 3;
+                } else {
+                    if (engine.scenario.isDefensiveScenario) {
+                        engine.scenarioOutcome = (axisCount <= 1) ? 1 : 2;
+                    } else {
+                        engine.scenarioOutcome = (alliedCount >= (engine.scenario.objectives.size() + 1) / 2) ? 1 : 2;
+                    }
+                }
+            } else {
+                engine.scenarioOutcome = 0;
+            }
+        }
+    }
+
+    private int evaluateAxisOutcome(boolean allAxis, int axisCount) {
         int scen = engine.currentScenarioNumber;
         switch (scen) {
-            case 12: { // TORCH (Defensive: Major = Tunis + 5 objs; Minor = Tunis + 2 objs)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 12: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsTunis = axisOwnsHex(27, 5);
-                    engine.scenarioOutcome = (holdsTunis && axisCount >= 6) ? 1
-                            : ((holdsTunis && axisCount >= 3) ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsTunis && axisCount >= 6) ? 1 : ((holdsTunis && axisCount >= 3) ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 13: { // HUSKY (Defensive: Major = hold >= 5 objs; Minor = hold >= 2 objs)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
-                    engine.scenarioOutcome = (axisCount >= 5) ? 1 : ((axisCount >= 2) ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+            case 13: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
+                    return (axisCount >= 5) ? 1 : ((axisCount >= 2) ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 14: { // ANZIO (Defensive: Major = retake Anzio + hold Rome & >= 5 objs; Minor = Rome + >= 2 objs)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 14: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsRome = axisOwnsHex(13, 17);
                     boolean holdsAnzio = axisOwnsHex(15, 25);
-                    engine.scenarioOutcome = (holdsRome && holdsAnzio && axisCount >= 5) ? 1
-                            : ((holdsRome && axisCount >= 3) ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsRome && holdsAnzio && axisCount >= 5) ? 1 : ((holdsRome && axisCount >= 3) ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 15: { // D-DAY (Defensive: Major = hold St. Lo, Caen & Cherbourg; Minor = hold >= 2 of 3)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
-                    int towns = (axisOwnsHex(22, 28) ? 1 : 0)
-                            + (axisOwnsHex(43, 27) ? 1 : 0)
-                            + (axisOwnsHex(11, 7) ? 1 : 0);
-                    engine.scenarioOutcome = (towns >= 3) ? 1 : ((towns >= 2) ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+            case 15: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
+                    int towns = (axisOwnsHex(22, 28) ? 1 : 0) + (axisOwnsHex(43, 27) ? 1 : 0) + (axisOwnsHex(11, 7) ? 1 : 0);
+                    return (towns >= 3) ? 1 : ((towns >= 2) ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 16: { // ANVIL (Defensive: Major = Marseilles + >= 2 objs; Minor = >= 2 objs)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 16: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsMarseilles = axisOwnsHex(12, 27);
-                    engine.scenarioOutcome = (holdsMarseilles && axisCount >= 3) ? 1
-                            : ((axisCount >= 2) ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsMarseilles && axisCount >= 3) ? 1 : ((axisCount >= 2) ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 17: { // ARDENNES (Offensive: Major = all objs incl. Brussels; Minor = all objs except Brussels)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 17: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean allExceptBrussels = true;
                     for (int[] obj : engine.scenario.objectives) {
                         if (!(obj[0] == 1 && obj[1] == 10) && !axisOwnsHex(obj[0], obj[1])) {
-                            allExceptBrussels = false;
-                            break;
+                            allExceptBrussels = false; break;
                         }
                     }
-                    engine.scenarioOutcome = allExceptBrussels ? 2 : 3;
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return allExceptBrussels ? 2 : 3;
                 }
-                return;
+                return 0;
             }
-            case 18: { // COBRA (Defensive: Major = hold all 4 French cities; Minor = hold >= 3)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
-                    engine.scenarioOutcome = (axisCount >= 4) ? 1 : ((axisCount >= 3) ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+            case 18: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
+                    return (axisCount >= 4) ? 1 : ((axisCount >= 3) ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 19: { // MARKET-GARDEN (Defensive: Major = Arnhem & Nijmegen; Minor = Arnhem)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 19: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsArnhem = axisOwnsHex(37, 10) && axisOwnsHex(38, 11);
                     boolean holdsNijmegen = axisOwnsHex(29, 11);
-                    engine.scenarioOutcome = (holdsArnhem && holdsNijmegen) ? 1 : (holdsArnhem ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsArnhem && holdsNijmegen) ? 1 : (holdsArnhem ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 20:   // BERLIN (WEST) (Defensive: Major = retake all objs [MWIN]; Minor = Berlin + 5 objs [DRAW])
-            case 34: { // BERLIN (EAST) (Defensive: Major = retake all objs [MWIN]; Minor = Berlin + 5 objs [DRAW])
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 20:
+            case 34: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsBerlin = axisOwnsHex(36, 14);
-                    engine.scenarioOutcome = (holdsBerlin && axisCount >= 6) ? 2 : 3;
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsBerlin && axisCount >= 6) ? 2 : 3;
                 }
-                return;
+                return 0;
             }
-            case 30: { // KURSK (Offensive: Major/Minor on all objs; Minor fallback if >= 1 obj held at end)
+            case 30: {
                 if (allAxis) {
                     int turnsLeft = engine.maxTurns - engine.turn;
-                    engine.scenarioOutcome = (turnsLeft >= engine.scenario.meta.decisiveTurnsRemaining) ? 1 : 2;
+                    return (turnsLeft >= engine.scenario.meta.decisiveTurnsRemaining) ? 1 : 2;
                 } else if (engine.turn > engine.maxTurns) {
-                    engine.scenarioOutcome = (axisCount >= 1) ? 2 : 3;
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (axisCount >= 1) ? 2 : 3;
                 }
-                return;
+                return 0;
             }
-            case 32: { // BYELORUSSIA (Defensive: Major = Warsaw + 2 objs; Minor = Warsaw)
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 32: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsWarsaw = axisOwnsHex(3, 12);
-                    engine.scenarioOutcome = (holdsWarsaw && axisCount >= 3) ? 1 : (holdsWarsaw ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsWarsaw && axisCount >= 3) ? 1 : (holdsWarsaw ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            case 35: { // BERLIN (Defensive: Major = Berlin + 5 objs [DRAW]; Minor = Berlin [DRAW])
-                if (allAxis) {
-                    engine.scenarioOutcome = 1;
-                } else if (engine.turn > engine.maxTurns) {
+            case 35: {
+                if (allAxis) return 1;
+                if (engine.turn > engine.maxTurns) {
                     boolean holdsBerlin = axisOwnsHex(35, 14);
-                    engine.scenarioOutcome = (holdsBerlin && axisCount >= 6) ? 1 : (holdsBerlin ? 2 : 3);
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return (holdsBerlin && axisCount >= 6) ? 1 : (holdsBerlin ? 2 : 3);
                 }
-                return;
+                return 0;
             }
-            default: { // Standard Offensive Scenarios (must capture all objectives within turn limit)
+            default: {
                 if (allAxis) {
                     int turnsLeft = engine.maxTurns - engine.turn;
-                    engine.scenarioOutcome = (turnsLeft >= engine.scenario.meta.decisiveTurnsRemaining) ? 1 : 2;
+                    return (turnsLeft >= engine.scenario.meta.decisiveTurnsRemaining) ? 1 : 2;
                 } else if (engine.turn > engine.maxTurns) {
-                    engine.scenarioOutcome = 3;
-                } else {
-                    engine.scenarioOutcome = 0;
+                    return 3;
                 }
+                return 0;
             }
         }
     }

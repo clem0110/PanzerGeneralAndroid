@@ -795,7 +795,7 @@ public class PgCombatSystem {
                 if (!engine.supplyEnabled || aDef.maxAmmo <= 0 || attacker.ammo > 0) {
                     attacker.attacked = false; // Tank retains its attack after an overrun!
                 }
-                if (attacker.isAxis && engine.isPlayerTurn) {
+                if (engine.isPlayerUnit(attacker) && engine.isPlayerTurn) {
                     // Player Tank Overrun: keep tank on its current hex so the player can choose whether and where to move
                     attacker.moved = false;
                     int maxMp = engine.getMaxMovementPoints(attacker);
@@ -809,7 +809,7 @@ public class PgCombatSystem {
                     attacker.row = defOrigRow;
                     engine.onHexCaptured(defOrigCol, defOrigRow, attacker);
                 }
-            } else if (!attacker.isAxis && dist == 1 && !aDef.isAir() && !dDef.isAir() && !rep.attackerDestroyed
+            } else if (engine.isAiUnit(attacker) && dist == 1 && !aDef.isAir() && !dDef.isAir() && !rep.attackerDestroyed
                     && engine.movementSystem.getTerrainMoveCost(aDef, engine.scenario.grid[defOrigCol][defOrigRow], false) < 99) {
                 // AI automatically advances into vacated hex on close assault
                 attacker.col = defOrigCol;

@@ -770,6 +770,72 @@ public class PgDatabase {
         return false;
     }
 
+    public static String getNationName(int nation) {
+        switch (nation) {
+            case 2: return "Belgium";
+            case 3: return "Bulgaria";
+            case 6: return "Finland";
+            case 7: return "France";
+            case 8: return "Germany";
+            case 9: return "Greece";
+            case 10: return "United States";
+            case 11: return "Hungary";
+            case 13: return "Italy";
+            case 14: return "Netherlands";
+            case 15: return "Norway";
+            case 16: return "Poland";
+            case 18: return "Romania";
+            case 20: return "Soviet Union";
+            case 23: return "Great Britain";
+            case 24: return "Yugoslavia";
+            default: return nation > 0 ? ("Nation " + nation) : "Neutral";
+        }
+    }
+
+    public boolean isUnitBelongsToNation(UnitDef def, int nation) {
+        if (def == null || def.name == null) return false;
+        switch (nation) {
+            case 8: return def.id <= 112 || def.id == 160 || def.id == 330 || def.id == 422;
+            case 13: return def.name.startsWith("IT ");
+            case 3: return def.id == 332 || (def.id <= 112 && def.cost <= 150);
+            case 11: return def.id == 333 || (def.id <= 112 && def.cost <= 150);
+            case 18: return def.id == 334 || (def.id <= 112 && def.cost <= 150);
+            case 6: return def.id <= 112;
+            case 16: return def.name.startsWith("PO ") || def.name.startsWith("FPO ") || def.name.startsWith("AF ");
+            case 7: return def.name.startsWith("FR ") || def.name.startsWith("FFR ") || def.name.startsWith("AF ");
+            case 23: return def.name.startsWith("GB ") || def.name.startsWith("AF ");
+            case 10: return def.name.startsWith("US ") || def.name.startsWith("AF ");
+            case 20: return def.name.startsWith("ST ") || def.id == 423 || def.id == 424 || def.name.startsWith("AF ");
+            case 15: return def.name.startsWith("NOR ") || def.name.startsWith("GB ") || def.name.startsWith("AF ");
+            case 2:
+            case 14: return def.name.startsWith("LC ") || def.name.startsWith("FR ") || def.name.startsWith("GB ") || def.name.startsWith("AF ");
+            case 9: return def.name.startsWith("Greek") || def.name.startsWith("GB ") || def.name.startsWith("AF ");
+            case 24: return def.name.startsWith("Yugoslav") || def.name.startsWith("GB ") || def.name.startsWith("AF ");
+            default: return false;
+        }
+    }
+
+    public boolean isUnitBelongsToSide(UnitDef def, boolean isAxis, ScenarioData sd) {
+        if (def == null) return false;
+        if (isAxis) {
+            if (def.id <= 112 || def.id == 160 || def.id == 330 || def.id == 422) return true;
+            if (sd != null && sd.axisNations != null) {
+                for (int nat : sd.axisNations) {
+                    if (nat > 0 && isUnitBelongsToNation(def, nat)) return true;
+                }
+            }
+            return false;
+        } else {
+            if (sd != null && sd.alliedNations != null) {
+                for (int nat : sd.alliedNations) {
+                    if (nat > 0 && isUnitBelongsToNation(def, nat)) return true;
+                }
+            }
+            return def.name.startsWith("GB ") || def.name.startsWith("US ") || def.name.startsWith("ST ")
+                    || def.name.startsWith("FR ") || def.name.startsWith("PO ") || def.name.startsWith("AF ");
+        }
+    }
+
     private int normalizeTerrain(int stmVal, int nameIdx, int tileId) {
         int low = stmVal & 0xFF;
         if (low <= 3) return 0; // Clear

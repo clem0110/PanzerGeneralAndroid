@@ -605,15 +605,230 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         AlertDialog.Builder b = new AlertDialog.Builder(this);
         b.setTitle("Select Historical Scenario (PGBUDV1_2)");
         b.setItems(items, (dialog, which) -> {
-            try {
-                engine.startSingleScenario(which + 1);
-                launchTacticalScreen();
-            } catch (IOException e) {
-                Toast.makeText(this, "Error loading scenario: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            }
+            showScenarioSideSelectDialog(which + 1);
         });
         b.setNegativeButton("Cancel", null);
         b.show();
+    }
+
+    private void showScenarioSideSelectDialog(final int scenNum) {
+        if (scenNum < 1 || scenNum > db.scenarios.size()) return;
+        final PgDatabase.ScenarioMeta meta = db.scenarios.get(scenNum - 1);
+        PgDatabase.ScenarioData sdCandidate = null;
+        try {
+            sdCandidate = db.loadScenario(scenNum);
+        } catch (Exception ignored) {}
+        final PgDatabase.ScenarioData sd = sdCandidate;
+
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF141915);
+        root.setPadding(32, 24, 32, 24);
+
+        LinearLayout headerBox = new LinearLayout(this);
+        headerBox.setOrientation(LinearLayout.VERTICAL);
+        headerBox.setPadding(20, 14, 20, 14);
+        GradientDrawable hdrBg = new GradientDrawable();
+        hdrBg.setColor(0xFF1F2721);
+        hdrBg.setCornerRadius(10f);
+        hdrBg.setStroke(2, 0xFFC5A059);
+        headerBox.setBackground(hdrBg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(String.format(Locale.ROOT, "#%02d %s", meta.number, meta.fullTitle.toUpperCase(Locale.ROOT)));
+        tvTitle.setTextColor(0xFFFFD54F);
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        headerBox.addView(tvTitle);
+
+        TextView tvSubtitle = new TextView(this);
+        tvSubtitle.setText(String.format(Locale.ROOT,
+                "Date: %02d/%d   •   Turn Limit: %d Turns   •   Select Operational Command Faction",
+                meta.month, meta.year, meta.turns));
+        tvSubtitle.setTextColor(0xFFB0BEC5);
+        tvSubtitle.setTextSize(12.5f);
+        tvSubtitle.setPadding(0, 4, 0, 0);
+        headerBox.addView(tvSubtitle);
+
+        root.addView(headerBox, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout cardsRow = new LinearLayout(this);
+        cardsRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        crLp.setMargins(0, 18, 0, 18);
+        cardsRow.setLayoutParams(crLp);
+        root.addView(cardsRow);
+
+        int axisPrimaryNat = (sd != null && sd.axisNations != null && sd.axisNations.length > 0 && sd.axisNations[0] > 0)
+                ? sd.axisNations[0] : 8;
+        StringBuilder axNatsSb = new StringBuilder();
+        if (sd != null && sd.axisNations != null) {
+            for (int n : sd.axisNations) {
+                if (n > 0) {
+                    if (axNatsSb.length() > 0) axNatsSb.append(", ");
+                    axNatsSb.append(PgDatabase.getNationName(n));
+                }
+            }
+        }
+        if (axNatsSb.length() == 0) axNatsSb.append("Germany");
+        boolean isDefensiveScenario = (sd != null) && sd.isDefensiveScenario;
+        String axRole = isDefensiveScenario ? "Defensive Operation (Hold Objectives)" : "Offensive Assault (Capture All Objectives)";
+        int axPrestigeVal = (meta.axisPrestige * engine.prestigeModifier) / 100;
+
+        int alliedPrimaryNat = (sd != null && sd.alliedNations != null && sd.alliedNations.length > 0 && sd.alliedNations[0] > 0)
+                ? sd.alliedNations[0] : 16;
+        StringBuilder alNatsSb = new StringBuilder();
+        if (sd != null && sd.alliedNations != null) {
+            for (int n : sd.alliedNations) {
+                if (n > 0) {
+                    if (alNatsSb.length() > 0) alNatsSb.append(", ");
+                    alNatsSb.append(PgDatabase.getNationName(n));
+                }
+            }
+        }
+        if (alNatsSb.length() == 0) alNatsSb.append(PgDatabase.getNationName(alliedPrimaryNat));
+        String alRole = isDefensiveScenario ? "Offensive Counter-Attack (Break Enemy Lines)" : "Defensive Stance (Hold Key Objectives)";
+        int alPrestigeVal = (meta.alliedPrestige * engine.prestigeModifier) / 100;
+
+        // AXIS CARD
+        LinearLayout axisCard = new LinearLayout(this);
+        axisCard.setOrientation(LinearLayout.VERTICAL);
+        axisCard.setPadding(24, 20, 24, 20);
+        GradientDrawable axCardBg = new GradientDrawable();
+        axCardBg.setColor(0xFF1E2822);
+        axCardBg.setCornerRadius(12f);
+        axCardBg.setStroke(2, 0xFFC5A059);
+        axisCard.setBackground(axCardBg);
+
+        LinearLayout axHdr = new LinearLayout(this);
+        axHdr.setOrientation(LinearLayout.HORIZONTAL);
+        axHdr.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView ivAxFlag = new ImageView(this);
+        Bitmap axFlagBmp = assets.getTrimmedSprite("FLAGS.SHP", Math.max(0, axisPrimaryNat - 1));
+        if (axFlagBmp != null) ivAxFlag.setImageBitmap(Bitmap.createScaledBitmap(axFlagBmp, 52, 38, false));
+        axHdr.addView(ivAxFlag, new LinearLayout.LayoutParams(52, 38));
+
+        TextView tvAxTitle = new TextView(this);
+        tvAxTitle.setText("  AXIS COMMAND");
+        tvAxTitle.setTextColor(0xFFFFD54F);
+        tvAxTitle.setTextSize(16f);
+        tvAxTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        axHdr.addView(tvAxTitle);
+        axisCard.addView(axHdr);
+
+        TextView tvAxBody = new TextView(this);
+        tvAxBody.setText(String.format(Locale.ROOT,
+                "\n• Forces: %s\n• Tactical Role: %s\n• Starting Prestige: ★ %d\n• Core Command: Wehrmacht & Axis Allies",
+                axNatsSb.toString(), axRole, axPrestigeVal));
+        tvAxBody.setTextColor(0xFFCFD8DC);
+        tvAxBody.setTextSize(13f);
+        tvAxBody.setLineSpacing(4f, 1f);
+        axisCard.addView(tvAxBody, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        Button btnPlayAxis = createCompactButton("⚔ PLAY AS AXIS", 0xFF2E7D32);
+        btnPlayAxis.setTextSize(14f);
+        btnPlayAxis.setPadding(0, 14, 0, 14);
+        btnPlayAxis.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+            try {
+                engine.startSingleScenario(scenNum, true);
+                launchTacticalScreen();
+            } catch (IOException e) {
+                Toast.makeText(this, "Error starting scenario: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+        axisCard.addView(btnPlayAxis, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout.LayoutParams axCardLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+        axCardLp.setMargins(0, 0, 12, 0);
+        cardsRow.addView(axisCard, axCardLp);
+
+        // ALLIED CARD
+        LinearLayout alliedCard = new LinearLayout(this);
+        alliedCard.setOrientation(LinearLayout.VERTICAL);
+        alliedCard.setPadding(24, 20, 24, 20);
+        GradientDrawable alCardBg = new GradientDrawable();
+        alCardBg.setColor(0xFF221F28);
+        alCardBg.setCornerRadius(12f);
+        alCardBg.setStroke(2, 0xFF90CAF9);
+        alliedCard.setBackground(alCardBg);
+
+        LinearLayout alHdr = new LinearLayout(this);
+        alHdr.setOrientation(LinearLayout.HORIZONTAL);
+        alHdr.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView ivAlFlag = new ImageView(this);
+        Bitmap alFlagBmp = assets.getTrimmedSprite("FLAGS.SHP", Math.max(0, alliedPrimaryNat - 1));
+        if (alFlagBmp != null) ivAlFlag.setImageBitmap(Bitmap.createScaledBitmap(alFlagBmp, 52, 38, false));
+        alHdr.addView(ivAlFlag, new LinearLayout.LayoutParams(52, 38));
+
+        TextView tvAlTitle = new TextView(this);
+        tvAlTitle.setText("  ALLIED COMMAND");
+        tvAlTitle.setTextColor(0xFF90CAF9);
+        tvAlTitle.setTextSize(16f);
+        tvAlTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        alHdr.addView(tvAlTitle);
+        alliedCard.addView(alHdr);
+
+        TextView tvAlBody = new TextView(this);
+        tvAlBody.setText(String.format(Locale.ROOT,
+                "\n• Forces: %s\n• Tactical Role: %s\n• Starting Prestige: ★ %d\n• Core Command: Allied Forces & National Arsenal",
+                alNatsSb.toString(), alRole, alPrestigeVal));
+        tvAlBody.setTextColor(0xFFCFD8DC);
+        tvAlBody.setTextSize(13f);
+        tvAlBody.setLineSpacing(4f, 1f);
+        alliedCard.addView(tvAlBody, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        Button btnPlayAllied = createCompactButton("⚔ PLAY AS ALLIED", 0xFF1565C0);
+        btnPlayAllied.setTextSize(14f);
+        btnPlayAllied.setPadding(0, 14, 0, 14);
+        btnPlayAllied.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+            try {
+                engine.startSingleScenario(scenNum, false);
+                launchTacticalScreen();
+            } catch (IOException e) {
+                Toast.makeText(this, "Error starting scenario: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+        alliedCard.addView(btnPlayAllied, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout.LayoutParams alCardLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+        alCardLp.setMargins(12, 0, 0, 0);
+        cardsRow.addView(alliedCard, alCardLp);
+
+        LinearLayout footerRow = new LinearLayout(this);
+        footerRow.setOrientation(LinearLayout.HORIZONTAL);
+        footerRow.setGravity(Gravity.END);
+
+        Button btnBack = createCompactButton("❮ BACK TO SCENARIOS", 0xFF37474F);
+        btnBack.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+            showScenarioSelectDialog();
+        });
+        footerRow.addView(btnBack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 60));
+
+        Button btnCancel = createCompactButton("✕ CANCEL", 0xFF7F2424);
+        btnCancel.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 60);
+        cancelLp.setMargins(14, 0, 0, 0);
+        footerRow.addView(btnCancel, cancelLp);
+
+        root.addView(footerRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        dialog.setContentView(root);
+        dialog.show();
     }
 
     private void launchTacticalScreen() {
@@ -627,7 +842,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         // Center camera on first Axis unit
         boolean centered = false;
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u != null && u.isAxis && u.strength > 0 && u.col >= 0 && u.row >= 0) {
+            if (u != null && engine.isPlayerUnit(u) && u.strength > 0 && u.col >= 0 && u.row >= 0) {
                 mapView.post(() -> {
                     mapView.centerOnHex(u.col, u.row);
                     mapView.selectUnit(u);
@@ -649,13 +864,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         if (engine.scenario == null) return;
         PgDatabase.ScenarioMeta m = engine.scenario.meta;
         tvScenarioTitle.setText(String.format(Locale.ROOT, "#%d %s (%s)",
-                m.number, m.fullTitle, engine.isCampaignMode ? "Campaign" : "Scenario"));
+                m.number, m.fullTitle, engine.isCampaignMode ? "Campaign" : (engine.playerIsAxis ? "Scenario • Axis" : "Scenario • Allied")));
 
         if (isAiTurnRunning) {
-            tvTurnWeather.setText(String.format(Locale.ROOT, "\u2605 ALLIED TURN IN PROGRESS (Turn %d/%d) \u2605", engine.turn, engine.maxTurns));
+            String enemySide = engine.getEnemySideName().toUpperCase(Locale.ROOT);
+            tvTurnWeather.setText(String.format(Locale.ROOT, "\u2605 %s TURN IN PROGRESS (Turn %d/%d) \u2605", enemySide, engine.turn, engine.maxTurns));
             btnNextUnit.setText("WAIT");
             btnNextUnit.setBackgroundColor(0xFF37474F);
-            btnEndTurn.setText("ALLIED TURN");
+            btnEndTurn.setText(enemySide + " TURN");
             btnEndTurn.setBackgroundColor(0xFF8E2424);
         } else if (engine.isDeploymentPhase) {
             tvTurnWeather.setText(String.format(Locale.ROOT, "★ DEPLOYMENT PHASE ★ • %d in Reserve", engine.unplacedCoreUnits.size()));
@@ -672,11 +888,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             btnEndTurn.setBackgroundColor(0xFF8E2424);
         }
 
-        tvPrestige.setText(String.format(Locale.ROOT, "★ %d Prestige", engine.axisPrestige));
+        tvPrestige.setText(String.format(Locale.ROOT, "★ %d Prestige", engine.getPlayerPrestige()));
 
         int heldObj = 0;
         for (int[] obj : engine.scenario.objectives) {
-            if (engine.db.isAxisNation(engine.scenario.grid[obj[0]][obj[1]].ownerNation, engine.scenario)) {
+            if (engine.isPlayerOwnedHex(engine.scenario.grid[obj[0]][obj[1]])) {
                 heldObj++;
             }
         }
@@ -684,14 +900,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 heldObj, engine.scenario.objectives.size()));
 
         if (btnRoster != null) {
-            int axisCount = 0;
+            int playerCount = 0;
             for (PgDatabase.ActiveUnit au : engine.units) {
-                if (au != null && au.isAxis && au.strength > 0) axisCount++;
+                if (au != null && engine.isPlayerUnit(au) && au.strength > 0) playerCount++;
             }
             if (engine.isDeploymentPhase) {
-                axisCount += engine.unplacedCoreUnits.size();
+                playerCount += engine.unplacedCoreUnits.size();
             }
-            btnRoster.setText("ROSTER (" + axisCount + ")");
+            btnRoster.setText("ROSTER (" + playerCount + ")");
         }
 
         updateUnitInspector(mapView.selectedCol, mapView.selectedRow, mapView.selectedUnit);
@@ -1116,7 +1332,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         headerRow.setBackground(hdrBg);
 
         ImageView ivFlag = new ImageView(this);
-        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", 7);
+        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", engine.getPlayerFlagSpriteIndex());
         if (flagBmp != null) {
             ivFlag.setImageBitmap(Bitmap.createScaledBitmap(flagBmp, 48, 36, false));
         }
@@ -1153,7 +1369,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         // Prestige Pill
         TextView tvPrestigePill = new TextView(this);
-        tvPrestigePill.setText(String.format(Locale.ROOT, "★ %d PRESTIGE", engine.axisPrestige));
+        tvPrestigePill.setText(String.format(Locale.ROOT, "★ %d PRESTIGE", engine.getPlayerPrestige()));
         tvPrestigePill.setTextColor(0xFF1B1F1B);
         tvPrestigePill.setTextSize(13.5f);
         tvPrestigePill.setTypeface(Typeface.DEFAULT_BOLD);
@@ -1533,7 +1749,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         // Gather all available Axis units in the scenario (deployed + unplaced reserves in deployment phase)
         final List<PgDatabase.ActiveUnit> allUnits = new ArrayList<>();
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u != null && u.isAxis && u.strength > 0) {
+            if (u != null && engine.isPlayerUnit(u) && u.strength > 0) {
                 allUnits.add(u);
             }
         }
@@ -1607,7 +1823,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         headerRow.setBackground(hdrBg);
 
         ImageView ivFlag = new ImageView(this);
-        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", 7);
+        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", engine.getPlayerFlagSpriteIndex());
         if (flagBmp != null) {
             ivFlag.setImageBitmap(Bitmap.createScaledBitmap(flagBmp, 48, 36, false));
         }
@@ -1618,7 +1834,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         LinearLayout titleStack = new LinearLayout(this);
         titleStack.setOrientation(LinearLayout.VERTICAL);
         TextView tvHeaderTitle = new TextView(this);
-        tvHeaderTitle.setText("AXIS FORCES ROSTER — " + engine.scenario.meta.fullTitle.toUpperCase(Locale.ROOT));
+        tvHeaderTitle.setText((engine.playerIsAxis ? "AXIS FORCES ROSTER — " : "ALLIED FORCES ROSTER — ") + engine.scenario.meta.fullTitle.toUpperCase(Locale.ROOT));
         tvHeaderTitle.setTextColor(0xFFFFD54F);
         tvHeaderTitle.setTextSize(15f);
         tvHeaderTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
@@ -2287,6 +2503,60 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         "Level Bombers"
     };
 
+    private List<PgDatabase.UnitDef> getAvailableUnitsForPlayer(boolean allYears) {
+        if (engine.playerIsAxis) {
+            return getAvailableAxisUnitsForPurchase(allYears);
+        }
+        return getAvailableAlliedUnitsForPurchase(allYears);
+    }
+
+    private List<PgDatabase.UnitDef> getAvailableAlliedUnitsForPurchase(boolean allYears) {
+        int curYear = (engine.scenario != null) ? (engine.scenario.meta.year % 100) : 39;
+        List<PgDatabase.UnitDef> available = new ArrayList<>();
+        for (PgDatabase.UnitDef u : db.equipment) {
+            if (u.id == 0 || u.name == null || u.name.isEmpty() || u.name.equalsIgnoreCase("RESERVED")) continue;
+            if (u.unitClass == PgDatabase.CLASS_LAND_TRANSPORT
+                    || u.unitClass == PgDatabase.CLASS_AIR_TRANSPORT
+                    || u.unitClass == PgDatabase.CLASS_SEA_TRANSPORT
+                    || u.unitClass == PgDatabase.CLASS_FORT
+                    || u.isFortification()) continue;
+            if (db.isUnitBelongsToSide(u, false, engine.scenario)) {
+                if (allYears || (u.startYear <= curYear && u.endYear >= curYear)) {
+                    available.add(u);
+                }
+            }
+        }
+        if (available.isEmpty()) {
+            for (PgDatabase.UnitDef u : db.equipment) {
+                if (u.id == 0 || u.name == null || u.name.isEmpty() || u.name.equalsIgnoreCase("RESERVED")) continue;
+                if (u.unitClass == PgDatabase.CLASS_LAND_TRANSPORT
+                        || u.unitClass == PgDatabase.CLASS_AIR_TRANSPORT
+                        || u.unitClass == PgDatabase.CLASS_SEA_TRANSPORT
+                        || u.unitClass == PgDatabase.CLASS_FORT
+                        || u.isFortification()) continue;
+                if (db.isUnitBelongsToSide(u, false, engine.scenario)) {
+                    available.add(u);
+                }
+            }
+        }
+        return available;
+    }
+
+    private int[] getAvailableLandTransportIdsForPlayer() {
+        if (engine.playerIsAxis) {
+            return new int[]{0, 86, 87, 88};
+        }
+        int nation = engine.getPrimaryPlayerNation();
+        switch (nation) {
+            case 20: return new int[]{0, 272, 125};
+            case 10: return new int[]{0, 370, 355};
+            case 23: return new int[]{0, 212, 211, 210};
+            case 7: return new int[]{0, 140, 407, 406};
+            case 16: return new int[]{0, 414, 413, 125};
+            default: return new int[]{0, 125, 212};
+        }
+    }
+
     private List<PgDatabase.UnitDef> getAvailableAxisUnitsForPurchase(boolean allYears) {
         int curYear = (engine.scenario != null) ? (engine.scenario.meta.year % 100) : 39;
         List<PgDatabase.UnitDef> available = new ArrayList<>();
@@ -2418,7 +2688,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         headerRow.setBackground(hdrBg);
 
         ImageView ivFlag = new ImageView(this);
-        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", 7);
+        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", engine.getPlayerFlagSpriteIndex());
         if (flagBmp != null) {
             ivFlag.setImageBitmap(Bitmap.createScaledBitmap(flagBmp, 48, 36, false));
         }
@@ -2429,7 +2699,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         LinearLayout titleStack = new LinearLayout(this);
         titleStack.setOrientation(LinearLayout.VERTICAL);
         TextView tvHeaderTitle = new TextView(this);
-        tvHeaderTitle.setText("OBERKOMMANDO DER WEHRMACHT — REQUISITION & DEPLOYMENT");
+        tvHeaderTitle.setText(engine.playerIsAxis
+                ? "OBERKOMMANDO DER WEHRMACHT — REQUISITION & DEPLOYMENT"
+                : "SUPREME ALLIED COMMAND — REQUISITION & DEPLOYMENT");
         tvHeaderTitle.setTextColor(0xFFFFD54F);
         tvHeaderTitle.setTextSize(15f);
         tvHeaderTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
@@ -2446,7 +2718,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         // Prestige Pill
         TextView tvPrestigePill = new TextView(this);
-        tvPrestigePill.setText(String.format(Locale.ROOT, "★ %d PRESTIGE", engine.axisPrestige));
+        tvPrestigePill.setText(String.format(Locale.ROOT, "★ %d PRESTIGE", engine.getPlayerPrestige()));
         tvPrestigePill.setTextColor(0xFF1B1F1B);
         tvPrestigePill.setTextSize(13.5f);
         tvPrestigePill.setTypeface(Typeface.DEFAULT_BOLD);
@@ -2521,7 +2793,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         final Runnable[] renderUI = new Runnable[1];
         renderUI[0] = () -> {
-            List<PgDatabase.UnitDef> allAvail = getAvailableAxisUnitsForPurchase(purchaseShowAllYears);
+            List<PgDatabase.UnitDef> allAvail = getAvailableUnitsForPlayer(purchaseShowAllYears);
             tabStrip.removeAllViews();
             rosterContainer.removeAllViews();
             detailCard.removeAllViews();
@@ -2817,7 +3089,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
                 LinearLayout trpStrip = new LinearLayout(this);
                 trpStrip.setOrientation(LinearLayout.HORIZONTAL);
-                int[] trpIds = {0, 86, 87, 88};
+                int[] trpIds = getAvailableLandTransportIdsForPlayer();
                 for (int i = 0; i < trpIds.length; i++) {
                     final int tid = trpIds[i];
                     boolean isTrpSel = (selectedTransportId == tid);
@@ -3008,7 +3280,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         box.addView(tv);
 
         AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle((u.isAxis ? "Axis Unit Dossier — " : "Allied Intelligence Report — ") + def.name);
+        String dossierPrefix = engine.isPlayerUnit(u)
+                ? (engine.playerIsAxis ? "Axis Unit Dossier — " : "Allied Unit Dossier — ")
+                : (engine.playerIsAxis ? "Allied Intelligence Report — " : "Axis Intelligence Report — ");
+        b.setTitle(dossierPrefix + def.name);
         b.setView(box);
         if (engine.canUpgradeUnit(u)) {
             b.setPositiveButton("Upgrade Equipment", (d, w) -> showUpgradeUnitDialog(u));
@@ -3084,7 +3359,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         headerRow.addView(tvUnitSub, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView tvPrestigePill = new TextView(this);
-        tvPrestigePill.setText("★ " + engine.axisPrestige + " PRESTIGE");
+        tvPrestigePill.setText("★ " + engine.getPlayerPrestige() + " PRESTIGE");
         tvPrestigePill.setTextColor(0xFF1A2218);
         tvPrestigePill.setTextSize(13.5f);
         tvPrestigePill.setTypeface(Typeface.DEFAULT_BOLD);
@@ -3166,7 +3441,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         final Runnable[] renderUI = new Runnable[1];
         renderUI[0] = () -> {
-            List<PgDatabase.UnitDef> allAvail = getAvailableAxisUnitsForPurchase(purchaseShowAllYears);
+            List<PgDatabase.UnitDef> allAvail = getAvailableUnitsForPlayer(purchaseShowAllYears);
             tabStrip.removeAllViews();
             rosterContainer.removeAllViews();
             detailCard.removeAllViews();
@@ -3499,7 +3774,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
                 LinearLayout trpStrip = new LinearLayout(this);
                 trpStrip.setOrientation(LinearLayout.HORIZONTAL);
-                int[] trpIds = {0, 86, 87, 88};
+                int[] trpIds = getAvailableLandTransportIdsForPlayer();
                 for (int i = 0; i < trpIds.length; i++) {
                     final int tid = trpIds[i];
                     boolean isTrpSel = (curSelectedTransportId[0] == tid);

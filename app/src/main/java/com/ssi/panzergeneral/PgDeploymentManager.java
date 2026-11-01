@@ -76,6 +76,7 @@ public class PgDeploymentManager {
     public List<int[]> getValidCoreDeploymentHexes(PgDatabase.ActiveUnit u) {
         List<int[]> res = new ArrayList<>();
         if (engine.scenario == null || u == null) return res;
+        boolean pAxis = engine.playerIsAxis;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         boolean isAir = def != null && def.isAir();
         boolean[][] added = new boolean[engine.scenario.cols][engine.scenario.rows];
@@ -86,7 +87,7 @@ public class PgDeploymentManager {
             if (dc >= 0 && dc < engine.scenario.cols && dr >= 0 && dr < engine.scenario.rows) {
                 // Ground units (in sea transports) and planes (in flight) can both deploy on water deploy hexes without a carrier
                 boolean allowWater = true;
-                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !isHexBlockedByEnemyNearBase(dc, dr, true)) {
+                if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !isHexBlockedByEnemyNearBase(dc, dr, pAxis)) {
                     added[dc][dr] = true;
                     res.add(new int[]{dc, dr});
                 }
@@ -96,13 +97,13 @@ public class PgDeploymentManager {
         // 2. Allow planes to be deployed on the same hex as other deployed units if they are land units
         if (isAir) {
             for (PgDatabase.ActiveUnit other : engine.units) {
-                if (other != null && other.isAxis && other.strength > 0 && !engine.isUnitOnAirLayer(other)) {
+                if (other != null && other.isAxis == pAxis && other.strength > 0 && !engine.isUnitOnAirLayer(other)) {
                     PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
                             ? db.equipment.get(other.unitDefId) : null;
                     if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
                         int c = other.col, r = other.row;
                         if (c >= 0 && c < engine.scenario.cols && r >= 0 && r < engine.scenario.rows) {
-                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                                 added[c][r] = true;
                                 res.add(new int[]{c, r});
                             }
@@ -117,14 +118,14 @@ public class PgDeploymentManager {
             for (int r = 0; r < engine.scenario.rows; r++) {
                 PgDatabase.HexCell cell = engine.scenario.grid[c][r];
                 boolean isBase = isAir ? (cell.terrainType == 6) : (cell.terrainType == 8 || cell.isPort() || cell.isSupplyPoint());
-                boolean isControlledBase = isBase && db.isAxisNation(cell.ownerNation, engine.scenario);
+                boolean isControlledBase = isBase && (db.isAxisNation(cell.ownerNation, engine.scenario) == pAxis);
                 if (isControlledBase) {
                     // If an enemy unit is next to a city or supply area or airport,
                     // a new unit cannot be placed at that hex or any surrounding hex.
-                    if (hasEnemyAdjacentOrOnHex(c, r, true)) continue;
+                    if (hasEnemyAdjacentOrOnHex(c, r, pAxis)) continue;
 
                     boolean allowWaterOnBase = cell.isWater() || cell.isPort() || cell.isDeployHex;
-                    if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                    if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                         added[c][r] = true;
                         res.add(new int[]{c, r});
                     }
@@ -244,7 +245,7 @@ public class PgDeploymentManager {
     public void startBattleAfterDeployment() {
         engine.isDeploymentPhase = false;
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u != null && u.isAxis) {
+            if (u != null && u.isAxis == engine.playerIsAxis) {
                 u.moved = false;
                 u.attacked = false;
                 u.movePointsUsed = 0;
@@ -260,6 +261,7 @@ public class PgDeploymentManager {
     public List<int[]> getAvailableDeployHexes(int unitDefId) {
         List<int[]> res = new ArrayList<>();
         if (engine.scenario == null) return res;
+        boolean pAxis = engine.playerIsAxis;
 
         // If in deployment phase, allow deploying purchased units on scenario deployment hexes as well
         if (engine.isDeploymentPhase) {
@@ -270,7 +272,7 @@ public class PgDeploymentManager {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < engine.scenario.cols && dr >= 0 && dr < engine.scenario.rows) {
                     boolean allowWater = true;
-                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !isHexBlockedByEnemyNearBase(dc, dr, true)) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, isAir, allowWater) && !isHexBlockedByEnemyNearBase(dc, dr, pAxis)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
                     }
@@ -278,13 +280,13 @@ public class PgDeploymentManager {
             }
             if (isAir) {
                 for (PgDatabase.ActiveUnit other : engine.units) {
-                    if (other != null && other.isAxis && other.strength > 0 && !engine.isUnitOnAirLayer(other)) {
+                    if (other != null && other.isAxis == pAxis && other.strength > 0 && !engine.isUnitOnAirLayer(other)) {
                         PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
                                 ? db.equipment.get(other.unitDefId) : null;
                         if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
                             int c = other.col, r = other.row;
                             if (c >= 0 && c < engine.scenario.cols && r >= 0 && r < engine.scenario.rows) {
-                                if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                                if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                                     added[c][r] = true;
                                     res.add(new int[]{c, r});
                                 }
@@ -297,11 +299,11 @@ public class PgDeploymentManager {
                 for (int r = 0; r < engine.scenario.rows; r++) {
                     PgDatabase.HexCell cell = engine.scenario.grid[c][r];
                     boolean isBase = isAir ? (cell.terrainType == 6) : (cell.terrainType == 8 || cell.isPort() || cell.isSupplyPoint());
-                    boolean isControlledBase = isBase && db.isAxisNation(cell.ownerNation, engine.scenario);
+                    boolean isControlledBase = isBase && (db.isAxisNation(cell.ownerNation, engine.scenario) == pAxis);
                     if (isControlledBase) {
-                        if (hasEnemyAdjacentOrOnHex(c, r, true)) continue;
+                        if (hasEnemyAdjacentOrOnHex(c, r, pAxis)) continue;
                         boolean allowWaterOnBase = !isAir && (cell.isWater() || cell.isPort() || cell.isDeployHex);
-                        if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, isAir, allowWaterOnBase) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
@@ -310,7 +312,7 @@ public class PgDeploymentManager {
                             if (nc >= 0 && nc < engine.scenario.cols && nr >= 0 && nr < engine.scenario.rows) {
                                 PgDatabase.HexCell nbCell = engine.scenario.grid[nc][nr];
                                 boolean allowWaterNb = !isAir && (cell.isPort() || nbCell.isDeployHex || nbCell.isPort());
-                                if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir, allowWaterNb) && !isHexBlockedByEnemyNearBase(nc, nr, true)) {
+                                if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir, allowWaterNb) && !isHexBlockedByEnemyNearBase(nc, nr, pAxis)) {
                                     added[nc][nr] = true;
                                     res.add(new int[]{nc, nr});
                                 }
@@ -328,7 +330,7 @@ public class PgDeploymentManager {
             for (int[] d : engine.scenario.deployHexes) {
                 int dc = d[0], dr = d[1];
                 if (dc >= 0 && dc < engine.scenario.cols && dr >= 0 && dr < engine.scenario.rows) {
-                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false, true) && !isHexBlockedByEnemyNearBase(dc, dr, true)) {
+                    if (!added[dc][dr] && canDeployAtHex(dc, dr, false, true) && !isHexBlockedByEnemyNearBase(dc, dr, pAxis)) {
                         added[dc][dr] = true;
                         res.add(new int[]{dc, dr});
                     }
@@ -337,8 +339,8 @@ public class PgDeploymentManager {
             for (int c = 0; c < engine.scenario.cols; c++) {
                 for (int r = 0; r < engine.scenario.rows; r++) {
                     PgDatabase.HexCell cell = engine.scenario.grid[c][r];
-                    if (cell.terrainType == 8 && db.isAxisNation(cell.ownerNation, engine.scenario)) {
-                        if (!added[c][r] && canDeployAtHex(c, r, false, false) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                    if (cell.terrainType == 8 && (db.isAxisNation(cell.ownerNation, engine.scenario) == pAxis)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, false, false) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
@@ -359,13 +361,13 @@ public class PgDeploymentManager {
         // - If an enemy unit is on or next to a city or supply area or airport, a new unit cannot be placed at that hex or any surrounding hex!
         if (isAir) {
             for (PgDatabase.ActiveUnit other : engine.units) {
-                if (other != null && other.isAxis && other.strength > 0 && !engine.isUnitOnAirLayer(other)) {
+                if (other != null && other.isAxis == pAxis && other.strength > 0 && !engine.isUnitOnAirLayer(other)) {
                     PgDatabase.UnitDef oDef = (other.unitDefId > 0 && other.unitDefId < db.equipment.size())
                             ? db.equipment.get(other.unitDefId) : null;
                     if (oDef != null && !oDef.isAir() && !oDef.isNaval()) {
                         int c = other.col, r = other.row;
                         if (c >= 0 && c < engine.scenario.cols && r >= 0 && r < engine.scenario.rows) {
-                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                            if (!added[c][r] && canDeployAtHex(c, r, true, true) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                                 added[c][r] = true;
                                 res.add(new int[]{c, r});
                             }
@@ -380,22 +382,22 @@ public class PgDeploymentManager {
                 PgDatabase.HexCell cell = engine.scenario.grid[c][r];
                 boolean isBase = isAir ? (cell.terrainType == 6) : (cell.terrainType == 8 || cell.isPort() || cell.isSupplyPoint());
                 if (isBase) {
-                    // Update ownership if currently occupied by an Axis ground unit capable of capturing
+                    // Update ownership if currently occupied by a player ground unit capable of capturing
                     PgDatabase.ActiveUnit gndOcc = engine.getUnitAt(c, r, false);
-                    if (gndOcc != null && gndOcc.isAxis && engine.canUnitCaptureCityOrAirport(gndOcc)
-                            && !db.isAxisNation(cell.ownerNation, engine.scenario)) {
+                    if (gndOcc != null && gndOcc.isAxis == pAxis && engine.canUnitCaptureCityOrAirport(gndOcc)
+                            && (db.isAxisNation(cell.ownerNation, engine.scenario) != pAxis)) {
                         cell.ownerNation = gndOcc.nation;
                     }
 
-                    if (db.isAxisNation(cell.ownerNation, engine.scenario)) {
+                    if (db.isAxisNation(cell.ownerNation, engine.scenario) == pAxis) {
                         // If enemy has a unit next to the city/supply area/airport (or on it),
                         // no units can be placed at that hex or any surrounding hex
-                        if (hasEnemyAdjacentOrOnHex(c, r, true)) {
+                        if (hasEnemyAdjacentOrOnHex(c, r, pAxis)) {
                             continue;
                         }
 
                         // Base hex itself (if unoccupied, valid terrain, and not blocked)
-                        if (!added[c][r] && canDeployAtHex(c, r, isAir) && !isHexBlockedByEnemyNearBase(c, r, true)) {
+                        if (!added[c][r] && canDeployAtHex(c, r, isAir) && !isHexBlockedByEnemyNearBase(c, r, pAxis)) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
                         }
@@ -406,7 +408,7 @@ public class PgDeploymentManager {
                             // Candidate deploy hex must be unoccupied, valid terrain,
                             // and not blocked by enemy near any base
                             if (!added[nc][nr] && canDeployAtHex(nc, nr, isAir)
-                                    && !isHexBlockedByEnemyNearBase(nc, nr, true)) {
+                                    && !isHexBlockedByEnemyNearBase(nc, nr, pAxis)) {
                                 added[nc][nr] = true;
                                 res.add(new int[]{nc, nr});
                             }
@@ -429,7 +431,7 @@ public class PgDeploymentManager {
         if (engine.getUnitAt(col, row, isAir) != null) return false;
         // Cannot deploy onto a hex that has an enemy unit on the other layer
         PgDatabase.ActiveUnit otherLayerUnit = engine.getUnitAt(col, row, !isAir);
-        if (otherLayerUnit != null && !otherLayerUnit.isAxis) return false;
+        if (otherLayerUnit != null && otherLayerUnit.isAxis != engine.playerIsAxis) return false;
 
         boolean isWaterHex = engine.scenario.grid[col][row].terrainType == 2 || engine.scenario.grid[col][row].isWater();
         // Air units and ground units can deploy onto water when allowWater is true (e.g. deployment phase)
@@ -445,7 +447,8 @@ public class PgDeploymentManager {
         if (transportDefId > 0 && transportDefId < db.equipment.size()) {
             totalCost += db.equipment.get(transportDefId).cost / 2;
         }
-        if (engine.axisPrestige < totalCost) return null;
+        boolean pAxis = engine.playerIsAxis;
+        if (engine.getPlayerPrestige() < totalCost) return null;
         if (engine.getUnitAt(col, row, def.isAir()) != null) return null;
 
         List<int[]> validSpots = getAvailableDeployHexes(unitDefId);
@@ -457,17 +460,17 @@ public class PgDeploymentManager {
             }
         }
         if (!validSpot) return null;
-        if (isHexBlockedByEnemyNearBase(col, row, true)) return null;
+        if (isHexBlockedByEnemyNearBase(col, row, pAxis)) return null;
 
-        engine.axisPrestige -= totalCost;
+        engine.addPlayerPrestige(-totalCost);
         int curId = engine.allocateInstanceId();
         boolean onWater = engine.scenario.grid[col][row].terrainType == 2 || engine.scenario.grid[col][row].isWater();
         PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
                 .instanceId(curId)
                 .unitDefId(unitDefId)
                 .transportDefId(transportDefId)
-                .nation(engine.scenario.axisNations[0] > 0 ? engine.scenario.axisNations[0] : 8)
-                .isAxis(true)
+                .nation(engine.getPrimaryPlayerNation())
+                .isAxis(pAxis)
                 .isCore(true)
                 .col(col)
                 .row(row)
@@ -480,7 +483,7 @@ public class PgDeploymentManager {
                 .moved(false)
                 .attacked(false)
                 .inSeaTransport(!def.isAir() && !def.isNaval() && onWater)
-                .facingLeft(false)
+                .facingLeft(!pAxis)
                 .customTitle(curId + ". " + def.name)
                 .build();
         if (u != null) {
@@ -505,18 +508,19 @@ public class PgDeploymentManager {
         for (int c = 0; c < engine.scenario.cols; c++) {
             for (int r = 0; r < engine.scenario.rows; r++) {
                 PgDatabase.HexCell cell = engine.scenario.grid[c][r];
-                boolean isAiOwned = cell.ownerNation > 0 && !db.isAxisNation(cell.ownerNation, engine.scenario);
+                boolean aiAxis = !engine.playerIsAxis;
+                boolean isAiOwned = cell.ownerNation > 0 && (db.isAxisNation(cell.ownerNation, engine.scenario) == aiAxis);
                 boolean isBase = isAir ? (cell.terrainType == 6 || cell.isObjective || cell.isSupplyPoint())
                         : (cell.terrainType == 8 || cell.isObjective || cell.isSupplyPoint() || cell.isPort());
                 if (isAiOwned && isBase) {
                     // If an enemy unit is next to a city or supply area or airport,
                     // a new unit cannot be placed at that hex or any surrounding hex.
-                    if (hasEnemyAdjacentOrOnHex(c, r, false)) {
+                    if (hasEnemyAdjacentOrOnHex(c, r, aiAxis)) {
                         continue;
                     }
 
                     // Check if base hex itself is a valid spawn hex
-                    if (isHexValidForAiSpawn(c, r, isAir) && !isHexBlockedByEnemyNearBase(c, r, false)) {
+                    if (isHexValidForAiSpawn(c, r, isAir) && !isHexBlockedByEnemyNearBase(c, r, aiAxis)) {
                         if (!added[c][r]) {
                             added[c][r] = true;
                             res.add(new int[]{c, r});
@@ -527,8 +531,8 @@ public class PgDeploymentManager {
                         int nc = nb[0], nr = nb[1];
                         if (nc >= 0 && nc < engine.scenario.cols && nr >= 0 && nr < engine.scenario.rows) {
                             PgDatabase.HexCell nbCell = engine.scenario.grid[nc][nr];
-                            boolean nbAiOwned = nbCell.ownerNation == 0 || !db.isAxisNation(nbCell.ownerNation, engine.scenario);
-                            if (nbAiOwned && isHexValidForAiSpawn(nc, nr, isAir) && !isHexBlockedByEnemyNearBase(nc, nr, false)) {
+                            boolean nbAiOwned = nbCell.ownerNation == 0 || (db.isAxisNation(nbCell.ownerNation, engine.scenario) == aiAxis);
+                            if (nbAiOwned && isHexValidForAiSpawn(nc, nr, isAir) && !isHexBlockedByEnemyNearBase(nc, nr, aiAxis)) {
                                 if (!added[nc][nr]) {
                                     added[nc][nr] = true;
                                     res.add(new int[]{nc, nr});
@@ -544,18 +548,19 @@ public class PgDeploymentManager {
 
     public boolean isHexValidForAiSpawn(int col, int row, boolean isAir) {
         if (engine.scenario == null || col < 0 || col >= engine.scenario.cols || row < 0 || row >= engine.scenario.rows) return false;
+        boolean aiAxis = !engine.playerIsAxis;
         PgDatabase.HexCell cell = engine.scenario.grid[col][row];
-        if (cell.ownerNation > 0 && db.isAxisNation(cell.ownerNation, engine.scenario)) return false;
+        if (cell.ownerNation > 0 && (db.isAxisNation(cell.ownerNation, engine.scenario) != aiAxis)) return false;
 
         // If an enemy unit is next to a city or supply area or airport,
         // a new unit cannot be placed at that hex or any surrounding hex.
-        if (isHexBlockedByEnemyNearBase(col, row, false)) return false;
+        if (isHexBlockedByEnemyNearBase(col, row, aiAxis)) return false;
 
         // No enemy (Axis) unit may occupy this hex on either layer
         PgDatabase.ActiveUnit gOn = engine.getUnitAt(col, row, false);
-        if (gOn != null && gOn.isAxis) return false;
+        if (gOn != null && gOn.isAxis != aiAxis) return false;
         PgDatabase.ActiveUnit aOn = engine.getUnitAt(col, row, true);
-        if (aOn != null && aOn.isAxis) return false;
+        if (aOn != null && aOn.isAxis != aiAxis) return false;
 
         // Target layer must be free
         if (engine.getUnitAt(col, row, isAir) != null) return false;
@@ -575,23 +580,23 @@ public class PgDeploymentManager {
         if (unitDefId <= 0 || unitDefId >= db.equipment.size()) return null;
         PgDatabase.UnitDef def = db.equipment.get(unitDefId);
         if (def.isFortification() || def.unitClass == PgDatabase.CLASS_FORT) return null;
-        if (engine.alliedPrestige < def.cost) return null;
-        if (isHexBlockedByEnemyNearBase(col, row, false)) return null;
+        boolean aiAxis = !engine.playerIsAxis;
+        if (engine.getAiPrestige() < def.cost) return null;
+        if (isHexBlockedByEnemyNearBase(col, row, aiAxis)) return null;
         if (engine.getUnitAt(col, row, def.isAir()) != null) return null;
         PgDatabase.ActiveUnit otherLayer = engine.getUnitAt(col, row, !def.isAir());
-        if (otherLayer != null && otherLayer.isAxis) return null;
+        if (otherLayer != null && otherLayer.isAxis != aiAxis) return null;
 
-        engine.alliedPrestige -= def.cost;
+        engine.addAiPrestige(-def.cost);
         int curId = engine.allocateInstanceId();
-        int nat = (engine.scenario.alliedNations != null && engine.scenario.alliedNations.length > 0 && engine.scenario.alliedNations[0] > 0)
-                ? engine.scenario.alliedNations[0] : 16;
+        int nat = engine.getPrimaryAiNation();
         PgDatabase.HexCell cell = engine.scenario.grid[col][row];
         int baseEnt = (cell.terrainType == 8 ? 2 : (cell.isObjective ? 1 : 0));
         PgDatabase.ActiveUnit u = PgDatabase.ActiveUnit.builder()
                 .instanceId(curId)
                 .unitDefId(unitDefId)
                 .nation(nat)
-                .isAxis(false)
+                .isAxis(aiAxis)
                 .isCore(false)
                 .col(col)
                 .row(row)
@@ -603,7 +608,7 @@ public class PgDeploymentManager {
                 .movePointsUsed(0)
                 .moved(false)
                 .attacked(false)
-                .facingLeft(true)
+                .facingLeft(!aiAxis)
                 .customTitle(curId + ". " + def.name)
                 .aiOrder((cell.isObjective || cell.isSupplyPoint()) && !def.isAir() ? 1 : 0)
                 .build();

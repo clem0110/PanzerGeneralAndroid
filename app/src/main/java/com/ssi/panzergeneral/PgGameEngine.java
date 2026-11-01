@@ -87,6 +87,7 @@ public class PgGameEngine {
         public int destRow;
         public int prevDestOwnerNation;
         public int prevAxisPrestige;
+        public int prevAlliedPrestige;
         public boolean capturedNewHex;
     }
 
@@ -128,6 +129,7 @@ public class PgGameEngine {
         public boolean westDefeated;
         public boolean eastDefeated;
         public boolean lowCountriesLost;
+        public boolean playerPlayingAllied;
     }
 
     public interface AiTurnCallback {
@@ -149,6 +151,7 @@ public class PgGameEngine {
     // Shared Scenario & Campaign State
     public PgDatabase.ScenarioData scenario;
     public boolean isCampaignMode = true;
+    public boolean playerIsAxis = true;
     public int campaignIndex = 0; // 0=1939 Poland, 1=1941 North Africa, 2=1941 Barbarossa, 3=1943 Husky, 4=1943 Kharkov
     public int currentScenarioNumber = 1;
     public boolean westDefeated = false;     // [NoW] War over in the West (Britain/Western Allies defeated)
@@ -230,6 +233,94 @@ public class PgGameEngine {
 
     public void startSingleScenario(int scenNum) throws IOException {
         campaignManager.startSingleScenario(scenNum);
+    }
+
+    public void startSingleScenario(int scenNum, boolean playAsAxis) throws IOException {
+        campaignManager.startSingleScenario(scenNum, playAsAxis);
+    }
+
+    public boolean isPlayerUnit(PgDatabase.ActiveUnit u) {
+        return u != null && u.isAxis == playerIsAxis;
+    }
+
+    public boolean isAiUnit(PgDatabase.ActiveUnit u) {
+        return u != null && u.isAxis != playerIsAxis;
+    }
+
+    public boolean isPlayerOwnedHex(PgDatabase.HexCell cell) {
+        return cell != null && cell.ownerNation > 0 && db.isAxisNation(cell.ownerNation, scenario) == playerIsAxis;
+    }
+
+    public boolean isAiOwnedHex(PgDatabase.HexCell cell) {
+        return cell != null && cell.ownerNation > 0 && db.isAxisNation(cell.ownerNation, scenario) != playerIsAxis;
+    }
+
+    public int getPlayerPrestige() {
+        return playerIsAxis ? axisPrestige : alliedPrestige;
+    }
+
+    public void setPlayerPrestige(int val) {
+        if (playerIsAxis) axisPrestige = val; else alliedPrestige = val;
+    }
+
+    public void addPlayerPrestige(int delta) {
+        if (playerIsAxis) {
+            axisPrestige = Math.max(0, axisPrestige + delta);
+        } else {
+            alliedPrestige = Math.max(0, alliedPrestige + delta);
+        }
+    }
+
+    public int getAiPrestige() {
+        return playerIsAxis ? alliedPrestige : axisPrestige;
+    }
+
+    public void setAiPrestige(int val) {
+        if (playerIsAxis) alliedPrestige = val; else axisPrestige = val;
+    }
+
+    public void addAiPrestige(int delta) {
+        if (playerIsAxis) {
+            alliedPrestige = Math.max(0, alliedPrestige + delta);
+        } else {
+            axisPrestige = Math.max(0, axisPrestige + delta);
+        }
+    }
+
+    public String getPlayerSideName() {
+        return playerIsAxis ? "Axis" : "Allied";
+    }
+
+    public String getEnemySideName() {
+        return playerIsAxis ? "Allied" : "Axis";
+    }
+
+    public int getPrimaryPlayerNation() {
+        if (playerIsAxis) {
+            return (scenario != null && scenario.axisNations != null && scenario.axisNations.length > 0 && scenario.axisNations[0] > 0)
+                    ? scenario.axisNations[0] : 8;
+        } else {
+            return (scenario != null && scenario.alliedNations != null && scenario.alliedNations.length > 0 && scenario.alliedNations[0] > 0)
+                    ? scenario.alliedNations[0] : 16;
+        }
+    }
+
+    public int getPrimaryAiNation() {
+        if (!playerIsAxis) {
+            return (scenario != null && scenario.axisNations != null && scenario.axisNations.length > 0 && scenario.axisNations[0] > 0)
+                    ? scenario.axisNations[0] : 8;
+        } else {
+            return (scenario != null && scenario.alliedNations != null && scenario.alliedNations.length > 0 && scenario.alliedNations[0] > 0)
+                    ? scenario.alliedNations[0] : 16;
+        }
+    }
+
+    public int getPlayerFlagSpriteIndex() {
+        return Math.max(0, getPrimaryPlayerNation() - 1);
+    }
+
+    public int getAiFlagSpriteIndex() {
+        return Math.max(0, getPrimaryAiNation() - 1);
     }
 
     public void loadScenario(int scenNum, boolean carryOverCore) throws IOException {

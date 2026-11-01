@@ -25,8 +25,16 @@ public class PgMovementSystem {
     }
 
     public PgDatabase.UnitDef getAirTransportDef() {
-        if (89 < db.equipment.size() && db.equipment.get(89).unitClass == PgDatabase.CLASS_AIR_TRANSPORT) {
-            return db.equipment.get(89);
+        return getAirTransportDef(engine != null ? engine.playerIsAxis : true);
+    }
+
+    public PgDatabase.UnitDef getAirTransportDef(boolean isAxis) {
+        int preferId = isAxis ? 89 : 178;
+        if (preferId < db.equipment.size() && db.equipment.get(preferId).unitClass == PgDatabase.CLASS_AIR_TRANSPORT) {
+            return db.equipment.get(preferId);
+        }
+        for (PgDatabase.UnitDef d : db.equipment) {
+            if (d.unitClass == PgDatabase.CLASS_AIR_TRANSPORT && (isAxis ? d.id < 120 : d.id >= 120)) return d;
         }
         for (PgDatabase.UnitDef d : db.equipment) {
             if (d.unitClass == PgDatabase.CLASS_AIR_TRANSPORT) return d;
@@ -51,7 +59,7 @@ public class PgMovementSystem {
 
     public PgDatabase.UnitDef getEffectiveUnitDef(PgDatabase.ActiveUnit u) {
         if (u == null) return null;
-        if (u.inAirTransport) return getAirTransportDef();
+        if (u.inAirTransport) return getAirTransportDef(u.isAxis);
         if (u.inSeaTransport) return getSeaTransportDef(u.isAxis);
         if (u.mountedInTransport && u.transportDefId > 0 && u.transportDefId < db.equipment.size()) {
             return db.equipment.get(u.transportDefId);
@@ -128,7 +136,7 @@ public class PgMovementSystem {
 
     public boolean isUnitVisibleToPlayer(PgDatabase.ActiveUnit u) {
         if (u == null || u.strength <= 0) return false;
-        if (!engine.fogOfWarEnabled || u.isAxis) return true;
+        if (!engine.fogOfWarEnabled || engine.isPlayerUnit(u)) return true;
         if (engine.visibleHexes == null || engine.scenario == null
                 || u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows
                 || !engine.visibleHexes[u.col][u.row]) {
@@ -144,7 +152,7 @@ public class PgMovementSystem {
             boolean hasAdjacentFriendly = false;
             for (int[] nb : getNeighbors(u.col, u.row)) {
                 PgDatabase.ActiveUnit adj = getUnitAt(nb[0], nb[1], false);
-                if (adj != null && adj.isAxis && adj.strength > 0) {
+                if (adj != null && adj.isAxis == engine.playerIsAxis && adj.strength > 0) {
                     hasAdjacentFriendly = true;
                     break;
                 }
@@ -161,7 +169,7 @@ public class PgMovementSystem {
         Set<Integer> set = new HashSet<>();
         if (engine.scenario == null || engine.visibleHexes == null) return set;
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u != null && !u.isAxis && u.strength > 0 && isUnitVisibleToPlayer(u)) {
+            if (u != null && engine.isAiUnit(u) && u.strength > 0 && isUnitVisibleToPlayer(u)) {
                 set.add(u.instanceId);
             }
         }
@@ -176,13 +184,13 @@ public class PgMovementSystem {
                     engine.visibleHexes[c][r] = true;
                 } else {
                     PgDatabase.HexCell cell = engine.scenario.grid[c][r];
-                    engine.visibleHexes[c][r] = db.isAxisNation(cell.ownerNation, engine.scenario);
+                    engine.visibleHexes[c][r] = (cell.ownerNation > 0 && db.isAxisNation(cell.ownerNation, engine.scenario) == engine.playerIsAxis);
                 }
             }
         }
         if (!engine.fogOfWarEnabled) return;
         for (PgDatabase.ActiveUnit u : engine.units) {
-            if (u == null || !u.isAxis || u.strength <= 0) continue;
+            if (u == null || !engine.isPlayerUnit(u) || u.strength <= 0) continue;
             if (u.unitDefId <= 0 || u.unitDefId >= db.equipment.size()) continue;
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
             if (def == null) continue;
@@ -523,7 +531,7 @@ public class PgMovementSystem {
         }
 
         recalculateFogOfWar();
-        if (u.isAxis) {
+        if (engine.isPlayerUnit(u)) {
             engine.lastUndoState = undo;
         } else {
             engine.lastUndoState = null;
@@ -588,7 +596,7 @@ public class PgMovementSystem {
 
     // Panzer General Manual: Embark / Disembark Air Transport (Paratroops), Sea Transport (Ports), and Organic Transport
     public boolean canToggleOrganicTransport(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def == null || def.isFortification() || def.isAir() || def.isNaval()) return false;
         if (u.inAirTransport || u.inSeaTransport) return false;
@@ -597,23 +605,23 @@ public class PgMovementSystem {
     }
 
     public boolean canSeaEmbark(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def == null || def.isFortification() || def.isAir() || def.isNaval()) return false;
         if (u.inAirTransport || u.inSeaTransport || u.attacked) return false;
         if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
         PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
-        return cell.isPort() && db.isAxisNation(cell.ownerNation, engine.scenario);
+        return cell.isPort() && (db.isAxisNation(cell.ownerNation, engine.scenario) == u.isAxis);
     }
 
     public boolean canAirliftEmbark(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def == null || def.isFortification() || def.isAir() || def.isNaval()) return false;
         if (u.inAirTransport || u.inSeaTransport || u.attacked || u.moved || u.movePointsUsed > 0) return false;
         if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
         PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
-        return cell.terrainType == 6 && db.isAxisNation(cell.ownerNation, engine.scenario)
+        return cell.terrainType == 6 && (db.isAxisNation(cell.ownerNation, engine.scenario) == u.isAxis)
                 && (def.unitClass == PgDatabase.CLASS_INFANTRY || def.isParatroop())
                 && getUnitAt(u.col, u.row, true) == null;
     }
@@ -661,11 +669,11 @@ public class PgMovementSystem {
         u.moved = true;
         u.attacked = true;
         u.movePointsUsed = getMaxMovementPoints(u);
-        return def.name + " embarked into Ju 52 Air Transport!";
+        return def.name + " embarked into " + (u.isAxis ? "Ju 52" : "C-47") + " Air Transport!";
     }
 
     public String getTransportActionLabel(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || engine.scenario == null) return "MOUNT";
+        if (u == null || !engine.isPlayerUnit(u) || engine.scenario == null) return "MOUNT";
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def == null) return "MOUNT";
         if (def.isFortification()) return "IMMOBILE";
@@ -693,7 +701,7 @@ public class PgMovementSystem {
     }
 
     public boolean canUseTransportAction(PgDatabase.ActiveUnit u) {
-        if (u == null || !u.isAxis || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
+        if (u == null || !engine.isPlayerUnit(u) || !engine.isPlayerTurn || u.strength <= 0 || engine.scenario == null) return false;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         if (def == null || def.isFortification()) return false;
         if (u.col < 0 || u.col >= engine.scenario.cols || u.row < 0 || u.row >= engine.scenario.rows) return false;
