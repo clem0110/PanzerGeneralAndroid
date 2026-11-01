@@ -42,6 +42,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     private TextView tvTurnWeather;
     private TextView tvPrestige;
     private TextView tvObjectivesCount;
+    private Button btnRoster;
+    private int rosterFilterMode = 0; // 0=All, 1=Can Move/Act, 2=Not Attacked, 3=Ground, 4=Air & Naval
 
     // Bottom bar controls
     private ImageView ivSelectedUnitIcon;
@@ -65,6 +67,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     private int pendingImportSlot = 0;
 
     private void setHudControlsEnabled(boolean enabled) {
+        if (btnRoster != null) btnRoster.setEnabled(enabled);
         if (btnEndTurn != null) btnEndTurn.setEnabled(enabled);
         if (btnNextUnit != null) btnNextUnit.setEnabled(enabled);
         if (btnPurchase != null) btnPurchase.setEnabled(enabled);
@@ -307,6 +310,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             showRequisitionDialog();
         });
         topBar.addView(tvPrestige);
+
+        btnRoster = createCompactButton("ROSTER", 0xFF2E5A44);
+        btnRoster.setOnClickListener(v -> {
+            if (isAiTurnRunning) return;
+            sounds.playClick();
+            showUnitRosterDialog();
+        });
+        topBar.addView(btnRoster);
 
         Button btnStratMap = createCompactButton("STRAT MAP", 0xFF2C3E50);
         btnStratMap.setOnClickListener(v -> {
@@ -665,6 +676,17 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
         tvObjectivesCount.setText(String.format(Locale.ROOT, "Objectives: %d/%d",
                 heldObj, engine.scenario.objectives.size()));
+
+        if (btnRoster != null) {
+            int axisCount = 0;
+            for (PgDatabase.ActiveUnit au : engine.units) {
+                if (au != null && au.isAxis && au.strength > 0) axisCount++;
+            }
+            if (engine.isDeploymentPhase) {
+                axisCount += engine.unplacedCoreUnits.size();
+            }
+            btnRoster.setText("ROSTER (" + axisCount + ")");
+        }
 
         updateUnitInspector(mapView.selectedCol, mapView.selectedRow, mapView.selectedUnit);
     }
@@ -1408,6 +1430,471 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             }
         }
         Toast.makeText(this, "All Axis units have completed their orders this turn.", Toast.LENGTH_SHORT).show();
+    }
+
+    private TextView createRosterStatusPill(String text, int bgColor, int strokeColor, int textColor) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(textColor);
+        tv.setTextSize(10.5f);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setPadding(12, 5, 12, 5);
+        tv.setSingleLine(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(bgColor);
+        bg.setCornerRadius(6f);
+        bg.setStroke(1, strokeColor);
+        tv.setBackground(bg);
+        return tv;
+    }
+
+    private void activateUnitFromRoster(PgDatabase.ActiveUnit u) {
+        if (u == null || engine.scenario == null || isAiTurnRunning) return;
+        if (u.col < 0 || u.row < 0) {
+            if (mapView.pendingOverrunUnit != null) {
+                mapView.cancelOverrunMoveSelection();
+            }
+            mapView.purchasePlacementMode = false;
+            mapView.strategicMapOverlay = false;
+            mapView.pendingDeployCoreUnit = u;
+            mapView.invalidate();
+            refreshHud();
+            PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+            Toast.makeText(this,
+                    "Tap any highlighted deployment hex (cyan) to place " + (def != null ? def.name : "unit"),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (mapView.pendingOverrunUnit != null && mapView.pendingOverrunUnit != u) {
+            mapView.cancelOverrunMoveSelection();
+        }
+        mapView.purchasePlacementMode = false;
+        mapView.pendingDeployCoreUnit = null;
+        mapView.strategicMapOverlay = false;
+
+        boolean onAir = engine.isUnitOnAirLayer(u);
+        mapView.airModePreferred = onAir;
+        if (btnAirToggle != null) {
+            btnAirToggle.setText(onAir ? "AIR TOP" : "GND TOP");
+        }
+
+        mapView.centerOnHex(u.col, u.row);
+        mapView.selectUnit(u);
+        refreshHud();
+    }
+
+    public void showUnitRosterDialog() {
+        if (engine.scenario == null || isAiTurnRunning) return;
+
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        // Gather all available Axis units in the scenario (deployed + unplaced reserves in deployment phase)
+        final List<PgDatabase.ActiveUnit> allUnits = new ArrayList<>();
+        for (PgDatabase.ActiveUnit u : engine.units) {
+            if (u != null && u.isAxis && u.strength > 0) {
+                allUnits.add(u);
+            }
+        }
+        if (engine.isDeploymentPhase && !engine.unplacedCoreUnits.isEmpty()) {
+            for (PgDatabase.ActiveUnit u : engine.unplacedCoreUnits) {
+                if (u != null && u.strength > 0) {
+                    allUnits.add(u);
+                }
+            }
+        }
+
+        // Sort by Reserve status (deployed first, then reserves), then unit class, then Core before Aux, then experience desc
+        Collections.sort(allUnits, (a, b) -> {
+            boolean aRes = (a.col < 0 || a.row < 0);
+            boolean bRes = (b.col < 0 || b.row < 0);
+            if (aRes != bRes) return aRes ? 1 : -1;
+            PgDatabase.UnitDef da = db.equipment.get(a.unitDefId);
+            PgDatabase.UnitDef dbDef = db.equipment.get(b.unitDefId);
+            int ca = da != null ? da.unitClass : 99;
+            int cb = dbDef != null ? dbDef.unitClass : 99;
+            if (ca != cb) return Integer.compare(ca, cb);
+            if (a.isCore != b.isCore) return a.isCore ? -1 : 1;
+            if (a.experience != b.experience) return Integer.compare(b.experience, a.experience);
+            return Integer.compare(a.instanceId, b.instanceId);
+        });
+
+        int canMoveCount = 0;
+        int notAttackedCount = 0;
+        int canActCount = 0;
+        int groundCount = 0;
+        int airNavalCount = 0;
+
+        for (PgDatabase.ActiveUnit u : allUnits) {
+            PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+            if (def == null) continue;
+            boolean isAirOrNav = def.isAir() || def.isNaval() || u.inAirTransport || u.inSeaTransport;
+            if (isAirOrNav) airNavalCount++;
+            else groundCount++;
+
+            boolean inReserve = (u.col < 0 || u.row < 0);
+            if (!inReserve) {
+                int remMp = engine.getRemainingMovementPoints(u);
+                if (!engine.isDeploymentPhase && !def.isFortification() && !u.moved && remMp > 0) {
+                    canMoveCount++;
+                }
+                if (!engine.isDeploymentPhase && !u.attacked) {
+                    notAttackedCount++;
+                }
+                if (engine.isDeploymentPhase || (!def.isFortification() && !u.moved && remMp > 0) || !u.attacked) {
+                    canActCount++;
+                }
+            } else {
+                canActCount++;
+            }
+        }
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF141915);
+        root.setPadding(20, 14, 20, 14);
+
+        // Header Bar
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(16, 10, 16, 10);
+        GradientDrawable hdrBg = new GradientDrawable();
+        hdrBg.setColor(0xFF1F2721);
+        hdrBg.setCornerRadius(10f);
+        hdrBg.setStroke(2, 0xFFC5A059);
+        headerRow.setBackground(hdrBg);
+
+        ImageView ivFlag = new ImageView(this);
+        Bitmap flagBmp = assets.getTrimmedSprite("FLAGS.SHP", 7);
+        if (flagBmp != null) {
+            ivFlag.setImageBitmap(Bitmap.createScaledBitmap(flagBmp, 48, 36, false));
+        }
+        LinearLayout.LayoutParams flagLp = new LinearLayout.LayoutParams(52, 40);
+        flagLp.setMargins(0, 0, 14, 0);
+        headerRow.addView(ivFlag, flagLp);
+
+        LinearLayout titleStack = new LinearLayout(this);
+        titleStack.setOrientation(LinearLayout.VERTICAL);
+        TextView tvHeaderTitle = new TextView(this);
+        tvHeaderTitle.setText("AXIS FORCES ROSTER — " + engine.scenario.meta.fullTitle.toUpperCase(Locale.ROOT));
+        tvHeaderTitle.setTextColor(0xFFFFD54F);
+        tvHeaderTitle.setTextSize(15f);
+        tvHeaderTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        titleStack.addView(tvHeaderTitle);
+
+        TextView tvSubHeader = new TextView(this);
+        if (engine.isDeploymentPhase) {
+            int onMap = allUnits.size() - engine.unplacedCoreUnits.size();
+            tvSubHeader.setText(String.format(Locale.ROOT,
+                    "Deployment Phase   •   Total Units: %d (%d On Map, %d In Reserve)   •   Tap any unit to select it",
+                    allUnits.size(), onMap, engine.unplacedCoreUnits.size()));
+        } else {
+            tvSubHeader.setText(String.format(Locale.ROOT,
+                    "Turn %d/%d   •   Available Units: %d   •   Can Move: %d   •   Not Attacked: %d   •   Tap a unit to make it active",
+                    engine.turn, engine.maxTurns, allUnits.size(), canMoveCount, notAttackedCount));
+        }
+        tvSubHeader.setTextColor(0xFFB0BEC5);
+        tvSubHeader.setTextSize(11.5f);
+        titleStack.addView(tvSubHeader);
+        headerRow.addView(titleStack, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (!engine.isDeploymentPhase) {
+            Button btnNextReady = createCompactButton("NEXT READY", 0xFF283593);
+            btnNextReady.setOnClickListener(v -> {
+                sounds.playClick();
+                dialog.dismiss();
+                selectNextUnmovedUnit();
+            });
+            LinearLayout.LayoutParams nrLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 58);
+            nrLp.setMargins(0, 0, 10, 0);
+            headerRow.addView(btnNextReady, nrLp);
+        }
+
+        Button btnClose = createCompactButton("✕ CLOSE", 0xFF7F2424);
+        btnClose.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+        });
+        headerRow.addView(btnClose, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 58));
+        root.addView(headerRow);
+
+        // Filter Tabs Bar
+        LinearLayout filterBar = new LinearLayout(this);
+        filterBar.setOrientation(LinearLayout.HORIZONTAL);
+        filterBar.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams fbLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        fbLp.setMargins(0, 10, 0, 6);
+
+        final String[] filterLabels = {
+            "ALL UNITS (" + allUnits.size() + ")",
+            "UNMOVED / CAN ACT (" + canActCount + ")",
+            "NOT ATTACKED (" + notAttackedCount + ")",
+            "GROUND (" + groundCount + ")",
+            "AIR & NAVAL (" + airNavalCount + ")"
+        };
+        final Button[] filterBtns = new Button[filterLabels.length];
+
+        ScrollView scroll = new ScrollView(this);
+        final LinearLayout listLayout = new LinearLayout(this);
+        listLayout.setOrientation(LinearLayout.VERTICAL);
+        listLayout.setPadding(0, 4, 0, 20);
+        scroll.addView(listLayout);
+
+        final Runnable[] renderRoster = new Runnable[1];
+        renderRoster[0] = () -> {
+            for (int i = 0; i < filterBtns.length; i++) {
+                boolean sel = (rosterFilterMode == i);
+                GradientDrawable gd = new GradientDrawable();
+                gd.setColor(sel ? 0xFF2E5A44 : 0xFF1F2721);
+                gd.setCornerRadius(8f);
+                gd.setStroke(sel ? 2 : 1, sel ? 0xFFFFD54F : 0xFF455A64);
+                filterBtns[i].setBackground(gd);
+                filterBtns[i].setTextColor(sel ? 0xFFFFF59D : 0xFFCFD8DC);
+            }
+
+            listLayout.removeAllViews();
+            int lastGroupKey = -999;
+            int shownCount = 0;
+
+            for (final PgDatabase.ActiveUnit u : allUnits) {
+                PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
+                if (def == null) continue;
+
+                boolean inReserve = (u.col < 0 || u.row < 0);
+                boolean isAirOrNav = def.isAir() || def.isNaval() || u.inAirTransport || u.inSeaTransport;
+                int remMp = inReserve ? def.movement : engine.getRemainingMovementPoints(u);
+                int maxMp = inReserve ? def.movement : engine.getMaxMovementPoints(u);
+                boolean canStillMove = !inReserve && !engine.isDeploymentPhase && !def.isFortification() && !u.moved && remMp > 0;
+                boolean hasNotAttacked = !inReserve && !engine.isDeploymentPhase && !u.attacked;
+
+                if (rosterFilterMode == 1 && !(engine.isDeploymentPhase || inReserve || canStillMove || hasNotAttacked)) {
+                    continue;
+                }
+                if (rosterFilterMode == 2 && !hasNotAttacked && !engine.isDeploymentPhase) {
+                    continue;
+                }
+                if (rosterFilterMode == 3 && isAirOrNav) {
+                    continue;
+                }
+                if (rosterFilterMode == 4 && !isAirOrNav) {
+                    continue;
+                }
+
+                shownCount++;
+                int groupKey = inReserve ? 1000 : def.unitClass;
+                if (groupKey != lastGroupKey) {
+                    lastGroupKey = groupKey;
+                    String headerText;
+                    if (inReserve) {
+                        headerText = "── IN RESERVE POOL (NOT YET DEPLOYED) ──";
+                    } else {
+                        String catName = (def.unitClass >= 0 && def.unitClass < PgDatabase.CLASS_NAMES.length)
+                                ? PgDatabase.CLASS_NAMES[def.unitClass] : "Units";
+                        headerText = "── " + catName.toUpperCase(Locale.ROOT) + " ──";
+                    }
+                    TextView tvGroup = new TextView(this);
+                    tvGroup.setText(headerText);
+                    tvGroup.setTextColor(0xFFFFD54F);
+                    tvGroup.setTextSize(12f);
+                    tvGroup.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvGroup.setPadding(10, 12, 10, 4);
+                    listLayout.addView(tvGroup);
+                }
+
+                final boolean isSelectedActive = (u == mapView.selectedUnit);
+                boolean fullySpent = !inReserve && !engine.isDeploymentPhase
+                        && (def.isFortification() || u.moved || remMp <= 0) && u.attacked;
+
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(LinearLayout.HORIZONTAL);
+                card.setGravity(Gravity.CENTER_VERTICAL);
+                card.setPadding(14, 10, 14, 10);
+                GradientDrawable cardBg = new GradientDrawable();
+                cardBg.setColor(isSelectedActive ? 0xFF28362B : (fullySpent ? 0xFF181D1A : 0xFF1E2621));
+                cardBg.setCornerRadius(8f);
+                if (isSelectedActive) {
+                    cardBg.setStroke(2, 0xFFFFD54F);
+                } else {
+                    cardBg.setStroke(1, fullySpent ? 0xFF2F3832 : 0xFF435748);
+                }
+                card.setBackground(cardBg);
+
+                LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cardLp.setMargins(0, 4, 0, 4);
+
+                // Unit Sprite
+                ImageView ivIcon = new ImageView(this);
+                Bitmap iconBmp = assets.getSprite("TACICONS.SHP", engine.getEffectiveIconId(u), u.facingLeft);
+                if (iconBmp != null) {
+                    ivIcon.setImageBitmap(Bitmap.createScaledBitmap(iconBmp, 56, 44, false));
+                    ivIcon.setAlpha(fullySpent && !isSelectedActive ? 0.65f : 1.0f);
+                }
+                LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(56, 44);
+                iconLp.setMargins(0, 0, 12, 0);
+                card.addView(ivIcon, iconLp);
+
+                // Unit Name, Strength, Stars & Hex Location
+                LinearLayout infoCol = new LinearLayout(this);
+                infoCol.setOrientation(LinearLayout.VERTICAL);
+
+                String unitLabel = (u.customTitle != null && !u.customTitle.isEmpty())
+                        ? (u.customTitle + " (" + def.name + ")")
+                        : def.name;
+                String coreTag = u.isCore ? "[CORE]" : "[AUX]";
+                String stars = u.getStars() > 0 ? (" " + "★".repeat(u.getStars())) : "";
+                String supStr = u.suppression > 0 ? (" (Sup:" + u.suppression + ")") : "";
+                String activePrefix = isSelectedActive ? "★ [ACTIVE] " : "";
+
+                TextView tvName = new TextView(this);
+                tvName.setText(String.format(Locale.ROOT, "%s%s  %s%s  •  Str: %d/%d%s",
+                        activePrefix, unitLabel, coreTag, stars, u.strength, u.getMaxOverstrength(), supStr));
+                tvName.setTextColor(isSelectedActive ? 0xFFFFF59D : (fullySpent ? 0xFFB0BEC5 : 0xFFFFD54F));
+                tvName.setTextSize(13.5f);
+                tvName.setTypeface(Typeface.DEFAULT_BOLD);
+                infoCol.addView(tvName);
+
+                String locStr;
+                if (inReserve) {
+                    locStr = "Reserve Pool (Tap to deploy onto map)";
+                } else {
+                    PgDatabase.HexCell cell = (u.col >= 0 && u.col < engine.scenario.cols && u.row >= 0 && u.row < engine.scenario.rows)
+                            ? engine.scenario.grid[u.col][u.row] : null;
+                    String hexName = (cell != null && cell.name != null && !cell.name.isEmpty())
+                            ? cell.name : (cell != null ? cell.getTerrainName() : "");
+                    locStr = String.format(Locale.ROOT, "Hex (%d,%d) %s", u.col, u.row, hexName);
+                }
+
+                String trpInfo = "";
+                if (u.inAirTransport) {
+                    trpInfo = " • [Airborne Ju 52]";
+                } else if (u.inSeaTransport) {
+                    trpInfo = " • [Naval Transport]";
+                } else if (u.transportDefId > 0 && u.transportDefId < db.equipment.size()) {
+                    trpInfo = " • Trp: " + db.equipment.get(u.transportDefId).name + (u.mountedInTransport ? " (Mounted)" : "");
+                }
+
+                String supplyStr = engine.supplyEnabled
+                        ? String.format(Locale.ROOT, " • Ammo:%d Fuel:%d", u.ammo, u.fuel)
+                        : "";
+                String entStr = (!inReserve && !def.isAir() && !def.isNaval())
+                        ? (" • Ent:" + u.entrenchment) : "";
+
+                TextView tvMeta = new TextView(this);
+                tvMeta.setText(locStr + entStr + supplyStr + trpInfo);
+                tvMeta.setTextColor(0xFFCFD8DC);
+                tvMeta.setTextSize(11.5f);
+                infoCol.addView(tvMeta);
+
+                card.addView(infoCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                // Right-side Movement Status Pill, Attack Status Pill & Activate Button
+                LinearLayout statusRow = new LinearLayout(this);
+                statusRow.setOrientation(LinearLayout.HORIZONTAL);
+                statusRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                // 1. Movement Status Pill
+                TextView movePill;
+                if (inReserve) {
+                    movePill = createRosterStatusPill("IN RESERVE", 0xFF4E2A0E, 0xFFFFB74D, 0xFFFFE0B2);
+                } else if (engine.isDeploymentPhase) {
+                    movePill = createRosterStatusPill("DEPLOYED", 0xFF004D40, 0xFF4DB6AC, 0xFFE0F2F1);
+                } else if (def.isFortification()) {
+                    movePill = createRosterStatusPill("STATIC (0 MP)", 0xFF263238, 0xFF546E7A, 0xFFB0BEC5);
+                } else if (u.moved || remMp <= 0) {
+                    movePill = createRosterStatusPill("MOVED", 0xFF263238, 0xFF546E7A, 0xFF90A4AE);
+                } else if (u.movePointsUsed > 0) {
+                    movePill = createRosterStatusPill(
+                            String.format(Locale.ROOT, "MOVED (%d/%d MP)", remMp, maxMp),
+                            0xFF5D3A00, 0xFFFFB74D, 0xFFFFF3E0);
+                } else {
+                    movePill = createRosterStatusPill(
+                            String.format(Locale.ROOT, "UNMOVED (%d MP)", remMp),
+                            0xFF1B4D24, 0xFF66BB6A, 0xFFE8F5E9);
+                }
+                LinearLayout.LayoutParams mpLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                mpLp.setMargins(6, 0, 4, 0);
+                statusRow.addView(movePill, mpLp);
+
+                // 2. Attack Status Pill
+                TextView atkPill;
+                if (engine.isDeploymentPhase || inReserve) {
+                    atkPill = createRosterStatusPill("PRE-BATTLE", 0xFF263238, 0xFF546E7A, 0xFFB0BEC5);
+                } else if (u.attacked) {
+                    atkPill = createRosterStatusPill("ATTACKED", 0xFF263238, 0xFF546E7A, 0xFF90A4AE);
+                } else {
+                    int tgtCount = engine.getValidTargets(u).size();
+                    if (tgtCount > 0) {
+                        atkPill = createRosterStatusPill(
+                                String.format(Locale.ROOT, "CAN ATTACK (%d TGT)", tgtCount),
+                                0xFF6E1A1A, 0xFFFF8A80, 0xFFFFEBEE);
+                    } else {
+                        atkPill = createRosterStatusPill("NOT ATTACKED", 0xFF103B66, 0xFF64B5F6, 0xFFE3F2FD);
+                    }
+                }
+                LinearLayout.LayoutParams apLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                apLp.setMargins(4, 0, 8, 0);
+                statusRow.addView(atkPill, apLp);
+
+                // 3. Select / Active Button
+                String selBtnLabel = inReserve ? "DEPLOY" : (isSelectedActive ? "ACTIVE" : "SELECT");
+                int selBtnColor = inReserve ? 0xFF00695C : (isSelectedActive ? 0xFF827717 : 0xFF2E5A44);
+                Button btnSelect = createCompactButton(selBtnLabel, selBtnColor);
+                View.OnClickListener selectAction = v -> {
+                    sounds.playSelect();
+                    dialog.dismiss();
+                    activateUnitFromRoster(u);
+                };
+                btnSelect.setOnClickListener(selectAction);
+                card.setOnClickListener(selectAction);
+
+                LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 52);
+                statusRow.addView(btnSelect, sbLp);
+
+                card.addView(statusRow);
+                listLayout.addView(card, cardLp);
+            }
+
+            if (shownCount == 0) {
+                TextView tvEmpty = new TextView(this);
+                tvEmpty.setText("No units match the selected filter.");
+                tvEmpty.setTextColor(0xFFB0BEC5);
+                tvEmpty.setTextSize(14f);
+                tvEmpty.setGravity(Gravity.CENTER);
+                tvEmpty.setPadding(24, 48, 24, 48);
+                listLayout.addView(tvEmpty);
+            }
+        };
+
+        for (int i = 0; i < filterLabels.length; i++) {
+            final int fIdx = i;
+            Button fb = createCompactButton(filterLabels[i], 0xFF1F2721);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, 52, 1f);
+            lp.setMargins(i == 0 ? 0 : 4, 0, i == filterLabels.length - 1 ? 0 : 4, 0);
+            fb.setLayoutParams(lp);
+            fb.setOnClickListener(v -> {
+                sounds.playClick();
+                rosterFilterMode = fIdx;
+                renderRoster[0].run();
+            });
+            filterBtns[i] = fb;
+            filterBar.addView(fb);
+        }
+
+        root.addView(filterBar, fbLp);
+        root.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        renderRoster[0].run();
+        dialog.setContentView(root);
+        dialog.show();
     }
 
     private void performEndTurn() {
@@ -3124,6 +3611,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
     private void showInGameMenuDialog() {
         String[] options = {
+            "Scenario Unit Roster (Move & Attack Status)",
             "Panzer General Instruction Manual & Tactical Rules",
             "Unit Dossier / Upgrade / Disband Selected Unit",
             "Game Options & Preferences (Supply, Weather, Fog of War...)",
@@ -3140,32 +3628,35 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 .setItems(options, (d, which) -> {
                     switch (which) {
                         case 0:
-                            showFieldManualDialog();
+                            showUnitRosterDialog();
                             break;
                         case 1:
+                            showFieldManualDialog();
+                            break;
+                        case 2:
                             if (mapView.selectedUnit != null) {
                                 showActiveUnitActionsModal(mapView.selectedUnit);
                             } else {
                                 Toast.makeText(this, "Select a unit on the map first.", Toast.LENGTH_SHORT).show();
                             }
                             break;
-                        case 2:
+                        case 3:
                             showPreferencesDialog();
                             break;
-                        case 3:
+                        case 4:
                             showSaveLoadDialog(true);
                             break;
-                        case 4:
+                        case 5:
                             showSaveLoadDialog(false);
                             break;
-                        case 5:
+                        case 6:
                             engine.supplyEnabled = !engine.supplyEnabled;
                             savePreferences();
                             if (mapView.selectedUnit != null) mapView.selectUnit(mapView.selectedUnit);
                             refreshHud();
                             Toast.makeText(this, "Supply (Fuel & Ammo): " + (engine.supplyEnabled ? "ON" : "OFF (Unlimited)"), Toast.LENGTH_SHORT).show();
                             break;
-                        case 6:
+                        case 7:
                             engine.weatherEnabled = !engine.weatherEnabled;
                             if (!engine.weatherEnabled) {
                                 engine.weather = 0;
@@ -3176,16 +3667,16 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                             mapView.invalidate();
                             Toast.makeText(this, "Weather Effects: " + (engine.weatherEnabled ? "ON" : "OFF (Always Clear/Dry)"), Toast.LENGTH_SHORT).show();
                             break;
-                        case 7:
+                        case 8:
                             engine.fogOfWarEnabled = !engine.fogOfWarEnabled;
                             engine.recalculateFogOfWar();
                             savePreferences();
                             mapView.invalidate();
                             break;
-                        case 8:
+                        case 9:
                             showEncyclopediaDialog();
                             break;
-                        case 9:
+                        case 10:
                             titleOverlay.setVisibility(View.VISIBLE);
                             break;
                     }
