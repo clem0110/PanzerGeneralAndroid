@@ -402,8 +402,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         });
         bottomBar.addView(infoBox, infoLp);
 
-        // Tactical Action Buttons
+        // Tactical Action Buttons (hidden by default; shown only when actually available to the active unit)
         btnUndo = createCompactButton("UNDO", 0xFF546E7A);
+        btnUndo.setVisibility(View.GONE);
         btnUndo.setOnClickListener(v -> {
             PgDatabase.ActiveUnit undone = engine.undoLastMove();
             if (undone != null) {
@@ -417,6 +418,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         bottomBar.addView(btnUndo);
 
         btnSupply = createCompactButton("SUPPLY", 0xFF2E5A36);
+        btnSupply.setVisibility(View.GONE);
         btnSupply.setOnClickListener(v -> {
             if (mapView.pendingOverrunUnit != null) {
                 sounds.playClick();
@@ -445,6 +447,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         bottomBar.addView(btnSupply);
 
         btnReinforce = createCompactButton("REPL", 0xFF3A536B);
+        btnReinforce.setVisibility(View.GONE);
         btnReinforce.setOnClickListener(v -> {
             if (mapView.selectedUnit != null && engine.reinforceUnit(mapView.selectedUnit, false)) {
                 sounds.playSelect();
@@ -455,6 +458,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         bottomBar.addView(btnReinforce);
 
         btnElite = createCompactButton("ELITE+", 0xFF5D4037);
+        btnElite.setVisibility(View.GONE);
         btnElite.setOnClickListener(v -> {
             if (mapView.selectedUnit != null && engine.reinforceUnit(mapView.selectedUnit, true)) {
                 sounds.playSelect();
@@ -465,6 +469,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         bottomBar.addView(btnElite);
 
         btnUpgrade = createCompactButton("UPGRADE", 0xFF4E342E);
+        btnUpgrade.setVisibility(View.GONE);
         btnUpgrade.setOnClickListener(v -> {
             if (mapView.selectedUnit != null && engine.canUpgradeUnit(mapView.selectedUnit)) {
                 sounds.playClick();
@@ -474,6 +479,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         bottomBar.addView(btnUpgrade);
 
         btnMount = createCompactButton("MOUNT", 0xFF455A64);
+        btnMount.setVisibility(View.GONE);
         btnMount.setOnClickListener(v -> {
             PgDatabase.ActiveUnit u = mapView.selectedUnit;
             if (u != null && engine.canUseTransportAction(u)) {
@@ -691,9 +697,30 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         updateUnitInspector(mapView.selectedCol, mapView.selectedRow, mapView.selectedUnit);
     }
 
+    private void setUnitActionButtonAvailable(Button btn, boolean available) {
+        if (btn == null) return;
+        btn.setEnabled(available);
+        btn.setVisibility(available ? View.VISIBLE : View.GONE);
+    }
+
+    private void updateCompactButtonColor(Button btn, int bgColor) {
+        if (btn == null) return;
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(bgColor);
+        gd.setCornerRadius(8f);
+        gd.setStroke(1, 0xFF90A4AE);
+        btn.setBackground(gd);
+    }
+
     private void updateUnitInspector(int col, int row, PgDatabase.ActiveUnit u) {
         if (isAiTurnRunning) {
             setHudControlsEnabled(false);
+            setUnitActionButtonAvailable(btnUndo, false);
+            setUnitActionButtonAvailable(btnSupply, false);
+            setUnitActionButtonAvailable(btnReinforce, false);
+            setUnitActionButtonAvailable(btnElite, false);
+            setUnitActionButtonAvailable(btnUpgrade, false);
+            setUnitActionButtonAvailable(btnMount, false);
             if (u != null) {
                 PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
                 Bitmap bmp = assets.getSprite("TACICONS.SHP", engine.getEffectiveIconId(u), u.facingLeft);
@@ -702,19 +729,19 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                         ? engine.scenario.grid[u.col][u.row] : null;
                 String sideTag = u.isAxis ? (u.isCore ? "[AXIS CORE]" : "[AXIS AUX]") : "[ALLIED]";
                 int maxStr = u.getMaxOverstrength();
-                tvSelectedTitle.setText(String.format(Locale.ROOT, "%s %s  |  Str: %d/%d (Sup:%d)  |  Exp: %d (%dâ˜…)",
+                tvSelectedTitle.setText(String.format(Locale.ROOT, "%s %s  |  Str: %d/%d (Sup:%d)  |  Exp: %d (%d★)",
                         sideTag, def.name, u.strength, maxStr, u.suppression, u.experience, u.getStars()));
                 PgDatabase.UnitDef effDef = engine.getEffectiveUnitDef(u);
                 String hexPosStr = cell != null ? String.format(Locale.ROOT, "Hex(%d,%d) %s", u.col, u.row, cell.name) : "";
                 tvSelectedStats.setText(String.format(Locale.ROOT,
-                        "SA:%d HA:%d AA:%d GD:%d AD:%d CD:%d â€¢ Rng:%d Ini:%d â€¢ %s",
+                        "SA:%d HA:%d AA:%d GD:%d AD:%d CD:%d • Rng:%d Ini:%d • %s",
                         effDef.softAttack, effDef.hardAttack, effDef.airAttack,
                         effDef.groundDefense, effDef.airDefense, effDef.closeDefense,
                         effDef.range, effDef.initiative, hexPosStr));
             }
             return;
         }
-        btnUndo.setEnabled(engine.canUndoLastMove());
+        setUnitActionButtonAvailable(btnUndo, engine.canUndoLastMove());
         if (u != null) {
             PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
             Bitmap bmp = assets.getSprite("TACICONS.SHP", engine.getEffectiveIconId(u), u.facingLeft);
@@ -752,39 +779,53 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     hexPosStr));
 
             if (engine.isDeploymentPhase) {
-                if (u.isAxis && u.isCore) {
+                setUnitActionButtonAvailable(btnUndo, false);
+                boolean canUndeploy = u.isAxis && u.isCore && u.col >= 0 && u.row >= 0;
+                if (canUndeploy) {
                     btnSupply.setText("UNDEPLOY");
-                    btnSupply.setEnabled(true);
-                    btnSupply.setBackgroundColor(0xFFD32F2F);
-                } else {
-                    btnSupply.setText("SUPPLY");
-                    btnSupply.setEnabled(false);
-                    btnSupply.setBackgroundColor(0xFF2E5A36);
+                    updateCompactButtonColor(btnSupply, 0xFFD32F2F);
                 }
-                btnReinforce.setEnabled(engine.canReinforceUnit(u, false));
-                btnElite.setEnabled(engine.canReinforceUnit(u, true));
-                btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
-                btnUpgrade.setEnabled(engine.canUpgradeUnit(u));
-                btnMount.setEnabled(false);
+                setUnitActionButtonAvailable(btnSupply, canUndeploy);
+
+                setUnitActionButtonAvailable(btnReinforce, engine.canReinforceUnit(u, false));
+                boolean canElite = engine.canReinforceUnit(u, true);
+                if (canElite) {
+                    btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
+                }
+                setUnitActionButtonAvailable(btnElite, canElite);
+                setUnitActionButtonAvailable(btnUpgrade, engine.canUpgradeUnit(u));
+                setUnitActionButtonAvailable(btnMount, false);
             } else if (mapView.pendingOverrunUnit != null && mapView.pendingOverrunUnit == u) {
+                setUnitActionButtonAvailable(btnUndo, false);
                 btnSupply.setText("STAY HERE");
-                btnSupply.setBackgroundColor(0xFF546E7A);
-                btnSupply.setEnabled(true);
-                btnReinforce.setEnabled(false);
-                btnElite.setEnabled(false);
-                btnUpgrade.setEnabled(false);
-                btnMount.setEnabled(false);
+                updateCompactButtonColor(btnSupply, 0xFF546E7A);
+                setUnitActionButtonAvailable(btnSupply, true);
+                setUnitActionButtonAvailable(btnReinforce, false);
+                setUnitActionButtonAvailable(btnElite, false);
+                setUnitActionButtonAvailable(btnUpgrade, false);
+                setUnitActionButtonAvailable(btnMount, false);
             } else {
-                btnSupply.setText("SUPPLY");
-                btnSupply.setBackgroundColor(0xFF2E5A36);
-                boolean canAct = u.isAxis && engine.isPlayerTurn && !u.moved && u.movePointsUsed == 0 && !u.attacked;
-                btnSupply.setEnabled(canAct && engine.supplyEnabled);
-                btnReinforce.setEnabled(engine.canReinforceUnit(u, false));
-                btnElite.setEnabled(engine.canReinforceUnit(u, true));
-                btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
-                btnUpgrade.setEnabled(engine.canUpgradeUnit(u));
-                btnMount.setText(engine.getTransportActionLabel(u));
-                btnMount.setEnabled(engine.canUseTransportAction(u));
+                boolean canResupply = engine.canResupplyUnit(u);
+                if (canResupply) {
+                    btnSupply.setText("SUPPLY");
+                    updateCompactButtonColor(btnSupply, 0xFF2E5A36);
+                }
+                setUnitActionButtonAvailable(btnSupply, canResupply);
+
+                setUnitActionButtonAvailable(btnReinforce, engine.canReinforceUnit(u, false));
+                boolean canElite = engine.canReinforceUnit(u, true);
+                if (canElite) {
+                    btnElite.setText(u.strength >= 10 && u.getStars() > 0 ? "OVRST+1" : "ELITE+");
+                }
+                setUnitActionButtonAvailable(btnElite, canElite);
+
+                setUnitActionButtonAvailable(btnUpgrade, engine.canUpgradeUnit(u));
+
+                boolean canTransport = engine.canUseTransportAction(u);
+                if (canTransport) {
+                    btnMount.setText(engine.getTransportActionLabel(u));
+                }
+                setUnitActionButtonAvailable(btnMount, canTransport);
             }
         } else if (col >= 0 && row >= 0 && engine.scenario != null) {
             PgDatabase.HexCell cell = engine.scenario.grid[col][row];
@@ -798,24 +839,20 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     cell.getBaseEntrenchment(),
                     cell.getInitiativeCap() >= 99 ? "None" : String.valueOf(cell.getInitiativeCap()),
                     cell.isSupplyPoint() ? "Yes" : "No"));
-            btnSupply.setText("SUPPLY");
-            btnSupply.setBackgroundColor(0xFF2E5A36);
-            btnSupply.setEnabled(false);
-            btnReinforce.setEnabled(false);
-            btnElite.setEnabled(false);
-            btnUpgrade.setEnabled(false);
-            btnMount.setEnabled(false);
+            setUnitActionButtonAvailable(btnSupply, false);
+            setUnitActionButtonAvailable(btnReinforce, false);
+            setUnitActionButtonAvailable(btnElite, false);
+            setUnitActionButtonAvailable(btnUpgrade, false);
+            setUnitActionButtonAvailable(btnMount, false);
         } else {
             ivSelectedUnitIcon.setImageBitmap(null);
             tvSelectedTitle.setText("No Hex Selected");
             tvSelectedStats.setText("Tap any unit to view combat stats, move, or attack.");
-            btnSupply.setText("SUPPLY");
-            btnSupply.setBackgroundColor(0xFF2E5A36);
-            btnSupply.setEnabled(false);
-            btnReinforce.setEnabled(false);
-            btnElite.setEnabled(false);
-            btnUpgrade.setEnabled(false);
-            btnMount.setEnabled(false);
+            setUnitActionButtonAvailable(btnSupply, false);
+            setUnitActionButtonAvailable(btnReinforce, false);
+            setUnitActionButtonAvailable(btnElite, false);
+            setUnitActionButtonAvailable(btnUpgrade, false);
+            setUnitActionButtonAvailable(btnMount, false);
         }
     }
 
@@ -1243,9 +1280,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     listLayout.addView(tvHeader);
                 }
 
+                List<int[]> validHexes = engine.getValidCoreDeploymentHexes(u);
+                boolean hasAnyDeployHex = !validHexes.isEmpty();
                 boolean canDeployOnTargetHex = false;
                 if (hasTargetHex) {
-                    List<int[]> validHexes = engine.getValidCoreDeploymentHexes(u);
                     for (int[] h : validHexes) {
                         if (h[0] == targetCol && h[1] == targetRow) {
                             canDeployOnTargetHex = true;
@@ -1359,40 +1397,42 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     btnStack.addView(btnUpg, blp);
                 }
 
-                Button btnDeploy;
-                if (hasTargetHex && canDeployOnTargetHex) {
-                    btnDeploy = createCompactButton("DEPLOY HERE", 0xFF2E7D32);
-                    btnDeploy.setOnClickListener(v -> {
-                        sounds.playClick();
-                        dialog.dismiss();
-                        onCoreUnitDeployRequested(u, targetCol, targetRow);
-                    });
-                } else if (hasTargetHex) {
-                    btnDeploy = createCompactButton("DEPLOY ELSEWHERE", 0xFF455A64);
-                    btnDeploy.setOnClickListener(v -> {
-                        sounds.playClick();
-                        dialog.dismiss();
-                        mapView.pendingDeployCoreUnit = u;
-                        mapView.invalidate();
-                        Toast.makeText(MainActivity.this,
-                                "Tap any highlighted deployment hex (cyan) to place " + def.name,
-                                Toast.LENGTH_LONG).show();
-                    });
-                } else {
-                    btnDeploy = createCompactButton("DEPLOY ON MAP", 0xFF00695C);
-                    btnDeploy.setOnClickListener(v -> {
-                        sounds.playClick();
-                        dialog.dismiss();
-                        mapView.pendingDeployCoreUnit = u;
-                        mapView.invalidate();
-                        Toast.makeText(MainActivity.this,
-                                "Tap any highlighted deployment hex (cyan) to place " + def.name,
-                                Toast.LENGTH_LONG).show();
-                    });
+                if (hasAnyDeployHex) {
+                    Button btnDeploy;
+                    if (hasTargetHex && canDeployOnTargetHex) {
+                        btnDeploy = createCompactButton("DEPLOY HERE", 0xFF2E7D32);
+                        btnDeploy.setOnClickListener(v -> {
+                            sounds.playClick();
+                            dialog.dismiss();
+                            onCoreUnitDeployRequested(u, targetCol, targetRow);
+                        });
+                    } else if (hasTargetHex) {
+                        btnDeploy = createCompactButton("DEPLOY ELSEWHERE", 0xFF455A64);
+                        btnDeploy.setOnClickListener(v -> {
+                            sounds.playClick();
+                            dialog.dismiss();
+                            mapView.pendingDeployCoreUnit = u;
+                            mapView.invalidate();
+                            Toast.makeText(MainActivity.this,
+                                    "Tap any highlighted deployment hex (cyan) to place " + def.name,
+                                    Toast.LENGTH_LONG).show();
+                        });
+                    } else {
+                        btnDeploy = createCompactButton("DEPLOY ON MAP", 0xFF00695C);
+                        btnDeploy.setOnClickListener(v -> {
+                            sounds.playClick();
+                            dialog.dismiss();
+                            mapView.pendingDeployCoreUnit = u;
+                            mapView.invalidate();
+                            Toast.makeText(MainActivity.this,
+                                    "Tap any highlighted deployment hex (cyan) to place " + def.name,
+                                    Toast.LENGTH_LONG).show();
+                        });
+                    }
+                    LinearLayout.LayoutParams depLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 56);
+                    depLp.setMargins(6, 0, 0, 0);
+                    btnStack.addView(btnDeploy, depLp);
                 }
-                LinearLayout.LayoutParams depLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 56);
-                depLp.setMargins(6, 0, 0, 0);
-                btnStack.addView(btnDeploy, depLp);
 
                 card.addView(btnStack);
                 listLayout.addView(card, cardLp);
@@ -2914,9 +2954,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void showActiveUnitActionsModal(PgDatabase.ActiveUnit u) {
-        if (u == null) return;
+        if (u == null || engine.scenario == null) return;
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
-        PgDatabase.HexCell cell = engine.scenario.grid[u.col][u.row];
+        PgDatabase.HexCell cell = (u.col >= 0 && u.col < engine.scenario.cols && u.row >= 0 && u.row < engine.scenario.rows)
+                ? engine.scenario.grid[u.col][u.row] : null;
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.HORIZONTAL);
@@ -2943,16 +2984,21 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         else if (def.unitClass == PgDatabase.CLASS_FIGHTER) specialRules = "\n• Special: Air Interceptor (protects adjacent friendly units from enemy bombers)";
         else if (def.unitClass == PgDatabase.CLASS_LEVEL_BOMBER) specialRules = "\n• Special: Strategic Bombardment (destroys enemy fuel/ammo & strips entrenchment)";
 
+        String locLine = (cell != null)
+                ? String.format(Locale.ROOT, "Hex (%d,%d) %s [%s • Entrenchment: %d • Ini Cap: %s]",
+                        u.col, u.row, cell.name, cell.getTerrainName(), u.entrenchment,
+                        cell.getInitiativeCap() >= 99 ? "Uncapped" : String.valueOf(cell.getInitiativeCap()))
+                : "Reserve Pool (Undeployed)";
+
         tv.setText(String.format(Locale.ROOT,
                 "Unit: %s (%s)\n" +
                 "Strength: %d / %d (Suppression: %d)  •  Experience: %d (%d★)\n" +
-                "Location: Hex (%d,%d) %s [%s • Entrenchment: %d • Ini Cap: %s]\n" +
+                "Location: %s\n" +
                 "Movement: %d / %d  •  Ammo: %s  •  Fuel: %s\n" +
                 "Combat: SA:%d  HA:%d  AA:%d  NA:%d  |  GD:%d  AD:%d  CD:%d  Ini:%d%s",
                 u.customTitle != null ? u.customTitle : def.name, cls,
                 u.strength, u.getMaxOverstrength(), u.suppression, u.experience, u.getStars(),
-                u.col, u.row, cell.name, cell.getTerrainName(), u.entrenchment,
-                cell.getInitiativeCap() >= 99 ? "Uncapped" : String.valueOf(cell.getInitiativeCap()),
+                locLine,
                 engine.getRemainingMovementPoints(u), engine.getMaxMovementPoints(u),
                 engine.supplyEnabled ? String.valueOf(u.ammo) : "∞",
                 engine.supplyEnabled ? String.valueOf(u.fuel) : "∞",
@@ -2988,9 +3034,17 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         return String.valueOf(newVal);
     }
 
+    private boolean isValidUpgradeCategoryForUnit(PgDatabase.UnitDef currentDef, int targetClass) {
+        if (currentDef == null) return false;
+        if (targetClass == currentDef.unitClass) return true;
+        // Towed Air Defense (CLASS_AIR_DEFENSE) and Self-Propelled Anti-Air (CLASS_ANTI_AIR) share the Air Defense upgrade branch
+        return (currentDef.unitClass == PgDatabase.CLASS_AIR_DEFENSE && targetClass == PgDatabase.CLASS_ANTI_AIR)
+                || (currentDef.unitClass == PgDatabase.CLASS_ANTI_AIR && targetClass == PgDatabase.CLASS_AIR_DEFENSE);
+    }
+
     private void showUpgradeUnitDialog(PgDatabase.ActiveUnit u) {
         if (u == null || !engine.canUpgradeUnit(u)) {
-            Toast.makeText(this, "Unit must be in deployment reserve or unmoved on a friendly City/Port/Airfield with no adjacent enemies to upgrade.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Ground units can only upgrade on a controlled City (planes on a controlled Airfield) with no adjacent enemies.", Toast.LENGTH_LONG).show();
             return;
         }
         PgDatabase.UnitDef currentDef = db.equipment.get(u.unitDefId);
@@ -3117,9 +3171,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             rosterContainer.removeAllViews();
             detailCard.removeAllViews();
 
-            // Category tabs
+            // Category tabs (only show categories eligible for this unit's class)
             for (int i = 0; i < PURCHASE_CATEGORY_CLASSES.length; i++) {
                 final int catClass = PURCHASE_CATEGORY_CLASSES[i];
+                if (!isValidUpgradeCategoryForUnit(currentDef, catClass)) continue;
                 String catName = PURCHASE_CATEGORY_LABELS[i];
                 int repUnitId = CATEGORY_REP_UNIT_IDS[i];
                 int count = 0;
@@ -3610,75 +3665,81 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     private void showInGameMenuDialog() {
-        String[] options = {
-            "Scenario Unit Roster (Move & Attack Status)",
-            "Panzer General Instruction Manual & Tactical Rules",
-            "Unit Dossier / Upgrade / Disband Selected Unit",
-            "Game Options & Preferences (Supply, Weather, Fog of War...)",
-            "Save Game (Local Slot / Google Drive)",
-            "Load Saved Game (Local Slot / Google Drive)",
-            "Supply (Fuel & Ammo): " + (engine.supplyEnabled ? "ON (Standard Rules)" : "OFF (Unlimited Fuel & Ammo)"),
-            "Weather Effects: " + (engine.weatherEnabled ? "ON (Dynamic Weather)" : "OFF (Always Clear/Dry)"),
-            "Fog of War: " + (engine.fogOfWarEnabled ? "ON" : "OFF"),
-            "Equipment Encyclopedia (425 Units)",
-            "Return to Title Screen"
-        };
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+
+        labels.add("Scenario Unit Roster (Move & Attack Status)");
+        actions.add(this::showUnitRosterDialog);
+
+        if (mapView.selectedUnit != null) {
+            final PgDatabase.ActiveUnit selUnit = mapView.selectedUnit;
+            PgDatabase.UnitDef selDef = db.equipment.get(selUnit.unitDefId);
+            String uName = selDef != null ? selDef.name : "Selected Unit";
+            if (selUnit.isAxis) {
+                boolean canUpg = engine.canUpgradeUnit(selUnit);
+                boolean canDisb = engine.canDisbandUnit(selUnit);
+                String actionTag = (canUpg && canDisb) ? " (Upgrade / Disband)"
+                        : (canUpg ? " (Upgrade)" : (canDisb ? " (Disband)" : ""));
+                labels.add("Unit Dossier — " + uName + actionTag);
+            } else {
+                labels.add("Allied Intelligence Report — " + uName);
+            }
+            actions.add(() -> showActiveUnitActionsModal(selUnit));
+        }
+
+        labels.add("Panzer General Instruction Manual & Tactical Rules");
+        actions.add(this::showFieldManualDialog);
+
+        labels.add("Game Options & Preferences (Supply, Weather, Fog of War...)");
+        actions.add(this::showPreferencesDialog);
+
+        labels.add("Save Game (Local Slot / Google Drive)");
+        actions.add(() -> showSaveLoadDialog(true));
+
+        labels.add("Load Saved Game (Local Slot / Google Drive)");
+        actions.add(() -> showSaveLoadDialog(false));
+
+        labels.add("Supply (Fuel & Ammo): " + (engine.supplyEnabled ? "ON (Standard Rules)" : "OFF (Unlimited Fuel & Ammo)"));
+        actions.add(() -> {
+            engine.supplyEnabled = !engine.supplyEnabled;
+            savePreferences();
+            if (mapView.selectedUnit != null) mapView.selectUnit(mapView.selectedUnit);
+            refreshHud();
+            Toast.makeText(this, "Supply (Fuel & Ammo): " + (engine.supplyEnabled ? "ON" : "OFF (Unlimited)"), Toast.LENGTH_SHORT).show();
+        });
+
+        labels.add("Weather Effects: " + (engine.weatherEnabled ? "ON (Dynamic Weather)" : "OFF (Always Clear/Dry)"));
+        actions.add(() -> {
+            engine.weatherEnabled = !engine.weatherEnabled;
+            if (!engine.weatherEnabled) {
+                engine.weather = 0;
+                engine.groundCondition = 0;
+            }
+            savePreferences();
+            refreshHud();
+            mapView.invalidate();
+            Toast.makeText(this, "Weather Effects: " + (engine.weatherEnabled ? "ON" : "OFF (Always Clear/Dry)"), Toast.LENGTH_SHORT).show();
+        });
+
+        labels.add("Fog of War: " + (engine.fogOfWarEnabled ? "ON" : "OFF"));
+        actions.add(() -> {
+            engine.fogOfWarEnabled = !engine.fogOfWarEnabled;
+            engine.recalculateFogOfWar();
+            savePreferences();
+            mapView.invalidate();
+        });
+
+        labels.add("Equipment Encyclopedia (425 Units)");
+        actions.add(this::showEncyclopediaDialog);
+
+        labels.add("Return to Title Screen");
+        actions.add(() -> titleOverlay.setVisibility(View.VISIBLE));
+
         new AlertDialog.Builder(this)
                 .setTitle("Command Menu")
-                .setItems(options, (d, which) -> {
-                    switch (which) {
-                        case 0:
-                            showUnitRosterDialog();
-                            break;
-                        case 1:
-                            showFieldManualDialog();
-                            break;
-                        case 2:
-                            if (mapView.selectedUnit != null) {
-                                showActiveUnitActionsModal(mapView.selectedUnit);
-                            } else {
-                                Toast.makeText(this, "Select a unit on the map first.", Toast.LENGTH_SHORT).show();
-                            }
-                            break;
-                        case 3:
-                            showPreferencesDialog();
-                            break;
-                        case 4:
-                            showSaveLoadDialog(true);
-                            break;
-                        case 5:
-                            showSaveLoadDialog(false);
-                            break;
-                        case 6:
-                            engine.supplyEnabled = !engine.supplyEnabled;
-                            savePreferences();
-                            if (mapView.selectedUnit != null) mapView.selectUnit(mapView.selectedUnit);
-                            refreshHud();
-                            Toast.makeText(this, "Supply (Fuel & Ammo): " + (engine.supplyEnabled ? "ON" : "OFF (Unlimited)"), Toast.LENGTH_SHORT).show();
-                            break;
-                        case 7:
-                            engine.weatherEnabled = !engine.weatherEnabled;
-                            if (!engine.weatherEnabled) {
-                                engine.weather = 0;
-                                engine.groundCondition = 0;
-                            }
-                            savePreferences();
-                            refreshHud();
-                            mapView.invalidate();
-                            Toast.makeText(this, "Weather Effects: " + (engine.weatherEnabled ? "ON" : "OFF (Always Clear/Dry)"), Toast.LENGTH_SHORT).show();
-                            break;
-                        case 8:
-                            engine.fogOfWarEnabled = !engine.fogOfWarEnabled;
-                            engine.recalculateFogOfWar();
-                            savePreferences();
-                            mapView.invalidate();
-                            break;
-                        case 9:
-                            showEncyclopediaDialog();
-                            break;
-                        case 10:
-                            titleOverlay.setVisibility(View.VISIBLE);
-                            break;
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    if (which >= 0 && which < actions.size()) {
+                        actions.get(which).run();
                     }
                 })
                 .setNegativeButton("Resume Battle", null)

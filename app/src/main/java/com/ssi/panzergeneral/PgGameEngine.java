@@ -543,6 +543,10 @@ public class PgGameEngine {
         return logisticsManager.hasAvailableAction(u);
     }
 
+    public boolean canResupplyUnit(PgDatabase.ActiveUnit u) {
+        return logisticsManager.canResupplyUnit(u);
+    }
+
     public boolean resupplyUnit(PgDatabase.ActiveUnit u) {
         return logisticsManager.resupplyUnit(u);
     }
