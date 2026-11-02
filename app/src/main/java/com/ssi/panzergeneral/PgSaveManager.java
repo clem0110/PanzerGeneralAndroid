@@ -52,6 +52,8 @@ public class PgSaveManager {
                 .eastDefeated(engine.eastDefeated)
                 .lowCountriesLost(engine.lowCountriesLost)
                 .playerPlayingAllied(!engine.playerIsAxis)
+                .selectedCol(engine.lastSelectedCol >= 0 ? engine.lastSelectedCol : null)
+                .selectedRow(engine.lastSelectedRow >= 0 ? engine.lastSelectedRow : null)
                 .build();
 
         ObjectOutputStream oos = new ObjectOutputStream(os);
@@ -162,6 +164,8 @@ public class PgSaveManager {
                 }
             }
             engine.scenarioOutcome = 0;
+            engine.lastSelectedCol = (st.selectedCol != null) ? st.selectedCol : -1;
+            engine.lastSelectedRow = (st.selectedRow != null) ? st.selectedRow : -1;
             engine.visibleHexes = new boolean[engine.scenario.cols][engine.scenario.rows];
             engine.recalculateFogOfWar();
             return true;
@@ -191,5 +195,87 @@ public class PgSaveManager {
         } catch (Exception e) {
             return "Slot " + slot + ": [Saved Game]";
         }
+    }
+
+    public static final String CACHE_FILE_NAME = "pg_session_cache.dat";
+
+    public void saveGameCache(File dir) throws IOException {
+        if (engine.scenario == null) return;
+        if (!dir.exists()) dir.mkdirs();
+        File targetFile = new File(dir, CACHE_FILE_NAME);
+        File tmpFile = new File(dir, CACHE_FILE_NAME + ".tmp");
+        try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+            saveGameToStream(fos);
+        }
+        if (targetFile.exists()) {
+            targetFile.delete();
+        }
+        if (!tmpFile.renameTo(targetFile)) {
+            try (FileInputStream in = new FileInputStream(tmpFile);
+                 FileOutputStream out = new FileOutputStream(targetFile)) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = in.read(buf)) > 0) {
+                    out.write(buf, 0, len);
+                }
+            }
+            tmpFile.delete();
+        }
+    }
+
+    public void saveGameCache(Context ctx) throws IOException {
+        saveGameCache(ctx.getFilesDir());
+    }
+
+    public boolean hasGameCache(File dir) {
+        File f = new File(dir, CACHE_FILE_NAME);
+        return f.exists() && f.length() > 0;
+    }
+
+    public boolean hasGameCache(Context ctx) {
+        return hasGameCache(ctx.getFilesDir());
+    }
+
+    public boolean loadGameCache(File dir) {
+        File f = new File(dir, CACHE_FILE_NAME);
+        if (!f.exists()) return false;
+        try (FileInputStream fis = new FileInputStream(f)) {
+            return loadGameFromStream(fis);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    public boolean loadGameCache(Context ctx) {
+        return loadGameCache(ctx.getFilesDir());
+    }
+
+    public void clearGameCache(File dir) {
+        File f = new File(dir, CACHE_FILE_NAME);
+        if (f.exists()) f.delete();
+        File tmp = new File(dir, CACHE_FILE_NAME + ".tmp");
+        if (tmp.exists()) tmp.delete();
+    }
+
+    public void clearGameCache(Context ctx) {
+        clearGameCache(ctx.getFilesDir());
+    }
+
+    public String getGameCacheSummary(File dir) {
+        File f = new File(dir, CACHE_FILE_NAME);
+        if (!f.exists()) return null;
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(f))) {
+            PgGameEngine.SaveState st = (PgGameEngine.SaveState) ois.readObject();
+            String side = st.playerPlayingAllied ? "Allied" : "Axis";
+            return String.format(Locale.ROOT, "%s [%s] (Turn %d/%d)",
+                    st.scenarioTitle, side, st.turn, st.maxTurns);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public String getGameCacheSummary(Context ctx) {
+        return getGameCacheSummary(ctx.getFilesDir());
     }
 }

@@ -34,6 +34,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
     private FrameLayout rootContainer;
     private View titleOverlay;
+    private Button btnResume;
     private LinearLayout hudContainer;
     private PgMapView mapView;
 
@@ -194,6 +195,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         btnGrid.setOrientation(LinearLayout.VERTICAL);
         btnGrid.setGravity(Gravity.CENTER);
 
+        btnResume = createStyledButton("\u2605 RESUME GAME \u2605", 0xFF1B4D3E, 0xFFFFD54F);
+        btnResume.setOnClickListener(v -> resumeGame());
+        btnGrid.addView(btnResume, createMenuBtnParams());
+
         Button btnCampaign = createStyledButton("START CAMPAIGN (1939–1945)", 0xFF2E4C34, 0xFFFFD54F);
         btnCampaign.setOnClickListener(v -> {
             sounds.playClick();
@@ -248,12 +253,144 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         this.titleOverlay = overlay;
         rootContainer.addView(titleOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        updateResumeButton();
     }
 
     private LinearLayout.LayoutParams createMenuBtnParams() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(720, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 5, 0, 5);
         return lp;
+    }
+
+    private void updateResumeButton() {
+        if (btnResume == null) return;
+        if (engine.scenario != null && engine.scenarioOutcome == 0) {
+            String title = engine.scenario.meta != null ? engine.scenario.meta.fullTitle : "Battle";
+            String side = engine.playerIsAxis ? "Axis" : "Allied";
+            btnResume.setText(String.format(Locale.ROOT, "\u2605 RESUME GAME: %s [%s] (Turn %d/%d) \u2605",
+                    title, side, engine.turn, engine.maxTurns));
+            btnResume.setVisibility(View.VISIBLE);
+        } else if (engine.hasGameCache(this)) {
+            String summary = engine.getGameCacheSummary(this);
+            if (summary != null && !summary.isEmpty()) {
+                btnResume.setText(String.format(Locale.ROOT, "\u2605 RESUME GAME: %s \u2605", summary));
+            } else {
+                btnResume.setText("\u2605 RESUME GAME \u2605");
+            }
+            btnResume.setVisibility(View.VISIBLE);
+        } else {
+            btnResume.setVisibility(View.GONE);
+        }
+    }
+
+    private void resumeGame() {
+        sounds.playClick();
+        if (engine.scenario != null && engine.scenarioOutcome == 0) {
+            if (titleOverlay != null) {
+                titleOverlay.setVisibility(View.GONE);
+            }
+            mapView.purchasePlacementMode = false;
+            mapView.strategicMapOverlay = false;
+            if (mapView.selectedUnit != null && engine.isPlayerUnit(mapView.selectedUnit)) {
+                mapView.centerOnHex(mapView.selectedUnit.col, mapView.selectedUnit.row);
+                mapView.selectUnit(mapView.selectedUnit);
+            } else {
+                centerCameraOnActiveUnits();
+            }
+            refreshHud();
+            mapView.invalidate();
+            sounds.playSelect();
+            if (sounds.isMusicEnabled()) {
+                sounds.startMusic(engine.currentScenarioNumber % 6);
+            }
+            Toast.makeText(this, "Resumed battle: " + (engine.scenario.meta != null ? engine.scenario.meta.fullTitle : "Battle"), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (engine.hasGameCache(this)) {
+            if (engine.loadGameCache(this)) {
+                if (titleOverlay != null) {
+                    titleOverlay.setVisibility(View.GONE);
+                }
+                mapView.purchasePlacementMode = false;
+                mapView.strategicMapOverlay = false;
+                centerCameraOnActiveUnits();
+                refreshHud();
+                mapView.invalidate();
+                sounds.playSelect();
+                if (sounds.isMusicEnabled()) {
+                    sounds.startMusic(engine.currentScenarioNumber % 6);
+                }
+                String name = (engine.scenario != null && engine.scenario.meta != null) ? engine.scenario.meta.fullTitle : "Battle";
+                Toast.makeText(this, "Resumed battle: " + name + " (Turn " + engine.turn + "/" + engine.maxTurns + ")", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Could not load cached battle.", Toast.LENGTH_SHORT).show();
+                engine.clearGameCache(this);
+                updateResumeButton();
+            }
+        }
+    }
+
+    private void centerCameraOnActiveUnits() {
+        if (engine.lastSelectedCol >= 0 && engine.lastSelectedRow >= 0
+                && engine.scenario != null
+                && engine.lastSelectedCol < engine.scenario.cols
+                && engine.lastSelectedRow < engine.scenario.rows) {
+            int sc = engine.lastSelectedCol;
+            int sr = engine.lastSelectedRow;
+            mapView.post(() -> {
+                mapView.centerOnHex(sc, sr);
+                PgDatabase.ActiveUnit u = engine.getUnitAt(sc, sr, false);
+                if (u == null) u = engine.getUnitAt(sc, sr, true);
+                if (u != null && engine.isPlayerUnit(u)) {
+                    mapView.selectUnit(u);
+                }
+                refreshHud();
+                mapView.invalidate();
+            });
+            return;
+        }
+        for (PgDatabase.ActiveUnit u : engine.units) {
+            if (u != null && engine.isPlayerUnit(u) && u.strength > 0 && u.col >= 0 && u.row >= 0) {
+                mapView.post(() -> {
+                    mapView.centerOnHex(u.col, u.row);
+                    mapView.selectUnit(u);
+                    refreshHud();
+                    mapView.invalidate();
+                });
+                return;
+            }
+        }
+        if (engine.scenario != null && !engine.scenario.deployHexes.isEmpty()) {
+            int[] dh = engine.scenario.deployHexes.get(0);
+            mapView.post(() -> {
+                mapView.centerOnHex(dh[0], dh[1]);
+                refreshHud();
+                mapView.invalidate();
+            });
+        }
+    }
+
+    private void showTitleScreen() {
+        if (mapView != null && mapView.pendingOverrunUnit != null) {
+            mapView.cancelOverrunMoveSelection();
+        }
+        if (engine.scenario != null && engine.scenarioOutcome == 0) {
+            try {
+                if (mapView != null) {
+                    engine.lastSelectedCol = mapView.selectedCol;
+                    engine.lastSelectedRow = mapView.selectedRow;
+                }
+                engine.saveGameCache(this);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        if (titleOverlay != null) {
+            titleOverlay.setVisibility(View.VISIBLE);
+            updateResumeButton();
+        }
+        sounds.stopMusic();
     }
 
     private void buildTacticalHud() {
@@ -585,7 +722,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         b.setTitle("Select Panzer General Campaign");
         b.setItems(PgGameEngine.CAMPAIGN_NAMES, (dialog, which) -> {
             try {
+                engine.clearGameCache(this);
                 engine.startCampaign(which);
+                try {
+                    engine.saveGameCache(this);
+                } catch (Exception ignored) {}
                 launchTacticalScreen();
             } catch (IOException e) {
                 Toast.makeText(this, "Failed to load campaign: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -737,7 +878,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             sounds.playClick();
             dialog.dismiss();
             try {
+                engine.clearGameCache(this);
                 engine.startSingleScenario(scenNum, true);
+                try {
+                    engine.saveGameCache(this);
+                } catch (Exception ignored) {}
                 launchTacticalScreen();
             } catch (IOException e) {
                 Toast.makeText(this, "Error starting scenario: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -791,7 +936,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             sounds.playClick();
             dialog.dismiss();
             try {
+                engine.clearGameCache(this);
                 engine.startSingleScenario(scenNum, false);
+                try {
+                    engine.saveGameCache(this);
+                } catch (Exception ignored) {}
                 launchTacticalScreen();
             } catch (IOException e) {
                 Toast.makeText(this, "Error starting scenario: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -2250,6 +2399,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                         refreshHud();
                         checkScenarioCompletion();
                         if (engine.scenarioOutcome == 0 && engine.isPlayerTurn && engine.scenario != null) {
+                            try {
+                                engine.saveGameCache(MainActivity.this);
+                            } catch (Exception ignored) {}
                             sounds.playSelect();
                             mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
                             Toast.makeText(MainActivity.this, "\u2605 YOUR TURN! Turn " + engine.turn + " of " + engine.maxTurns + " \u2605", Toast.LENGTH_SHORT).show();
@@ -2350,11 +2502,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 });
             }
             b.setNegativeButton("Main Menu", (d, w) -> {
-                titleOverlay.setVisibility(View.VISIBLE);
+                showTitleScreen();
             });
         } else {
             b.setPositiveButton("Main Menu", (d, w) -> {
-                titleOverlay.setVisibility(View.VISIBLE);
+                engine.scenario = null;
+                engine.clearGameCache(this);
+                showTitleScreen();
             });
         }
         b.show();
@@ -2384,7 +2538,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         b.setView(scroll);
         b.setCancelable(false);
         b.setNegativeButton("Main Menu", (d, w) -> {
-            titleOverlay.setVisibility(View.VISIBLE);
+            showTitleScreen();
         });
         scroll.addView(container);
         AlertDialog dlg = b.create();
@@ -2424,6 +2578,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                                            PgCampaignManager.BranchOption chosen) {
         try {
             engine.commitCampaignTransition(step, chosen);
+            try {
+                engine.saveGameCache(this);
+            } catch (Exception ignored) {}
             launchTacticalScreen();
         } catch (IOException e) {
             Toast.makeText(this, "Error loading next scenario: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -4008,7 +4165,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         actions.add(this::showEncyclopediaDialog);
 
         labels.add("Return to Title Screen");
-        actions.add(() -> titleOverlay.setVisibility(View.VISIBLE));
+        actions.add(this::showTitleScreen);
 
         new AlertDialog.Builder(this)
                 .setTitle("Command Menu")
@@ -4158,8 +4315,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                             }
                         } else {
                             if (engine.loadGame(this, slot)) {
+                                try {
+                                    engine.saveGameCache(this);
+                                } catch (Exception ignored) {}
                                 if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
-                                mapView.clearSelection();
+                                mapView.purchasePlacementMode = false;
+                                mapView.strategicMapOverlay = false;
+                                centerCameraOnActiveUnits();
                                 refreshHud();
                                 mapView.invalidate();
                                 sounds.playSelect();
@@ -4296,8 +4458,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             try (InputStream is = getContentResolver().openInputStream(uri)) {
                 if (is == null) throw new IOException("Unable to open input stream.");
                 if (engine.loadGameFromStream(is)) {
+                    try {
+                        engine.saveGameCache(this);
+                    } catch (Exception ignored) {}
                     if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
-                    mapView.clearSelection();
+                    mapView.purchasePlacementMode = false;
+                    mapView.strategicMapOverlay = false;
+                    centerCameraOnActiveUnits();
                     refreshHud();
                     mapView.invalidate();
                     sounds.playSelect();
@@ -4323,8 +4490,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                                 .setMessage("Successfully imported save file into Slot " + slot + "!\n\n" + summary + "\n\nWould you like to load and play this game now?")
                                 .setPositiveButton("Load & Play Now", (d, w) -> {
                                     if (engine.loadGame(this, slot)) {
+                                        try {
+                                            engine.saveGameCache(this);
+                                        } catch (Exception ignored) {}
                                         if (titleOverlay != null) titleOverlay.setVisibility(View.GONE);
-                                        mapView.clearSelection();
+                                        mapView.purchasePlacementMode = false;
+                                        mapView.strategicMapOverlay = false;
+                                        centerCameraOnActiveUnits();
                                         refreshHud();
                                         mapView.invalidate();
                                         sounds.playSelect();
@@ -4433,16 +4605,77 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     @Override
+    public void onBackPressed() {
+        if (titleOverlay != null && titleOverlay.getVisibility() != View.VISIBLE) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Return to Main Menu?")
+                    .setMessage("Your tactical battle progress is automatically cached. You can resume anytime from the Main Menu.")
+                    .setPositiveButton("Main Menu", (d, w) -> {
+                        sounds.playClick();
+                        showTitleScreen();
+                    })
+                    .setNegativeButton("Continue Playing", null)
+                    .show();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         sounds.stopMusic();
         sounds.stopVoice();
+        if (engine.scenario != null && engine.scenarioOutcome == 0) {
+            try {
+                if (mapView != null) {
+                    engine.lastSelectedCol = mapView.selectedCol;
+                    engine.lastSelectedRow = mapView.selectedRow;
+                }
+                engine.saveGameCache(this);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (engine.scenario != null && engine.scenarioOutcome == 0) {
+            try {
+                if (mapView != null) {
+                    engine.lastSelectedCol = mapView.selectedCol;
+                    engine.lastSelectedRow = mapView.selectedRow;
+                }
+                engine.saveGameCache(this);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (engine.scenario != null && engine.scenarioOutcome == 0) {
+            try {
+                if (mapView != null) {
+                    engine.lastSelectedCol = mapView.selectedCol;
+                    engine.lastSelectedRow = mapView.selectedRow;
+                }
+                engine.saveGameCache(this);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (sounds.isMusicEnabled()) {
+        updateResumeButton();
+        if (sounds.isMusicEnabled() && titleOverlay != null && titleOverlay.getVisibility() != View.VISIBLE && engine.scenario != null) {
             sounds.startMusic(engine.currentScenarioNumber % 6);
         }
     }

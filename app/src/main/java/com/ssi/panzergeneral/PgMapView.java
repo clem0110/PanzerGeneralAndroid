@@ -293,6 +293,10 @@ public class PgMapView extends View {
         selectedCol = -1;
         selectedRow = -1;
         selectedUnit = null;
+        if (engine != null) {
+            engine.lastSelectedCol = -1;
+            engine.lastSelectedRow = -1;
+        }
         reachableHexes.clear();
         validTargets.clear();
         if (listener != null && engine != null && engine.scenario != null) {
@@ -309,6 +313,10 @@ public class PgMapView extends View {
         selectedCol = u.col;
         selectedRow = u.row;
         selectedUnit = u;
+        if (engine != null) {
+            engine.lastSelectedCol = u.col;
+            engine.lastSelectedRow = u.row;
+        }
         if (engine.isPlayerUnit(u) && engine.isPlayerTurn && !engine.isDeploymentPhase) {
             reachableHexes = engine.getReachableHexes(u);
             validTargets = engine.getValidTargets(u);
@@ -334,6 +342,10 @@ public class PgMapView extends View {
         selectedCol = u.col;
         selectedRow = u.row;
         selectedUnit = u;
+        if (engine != null) {
+            engine.lastSelectedCol = u.col;
+            engine.lastSelectedRow = u.row;
+        }
         reachableHexes = engine.getReachableHexes(u);
         validTargets.clear();
         bannerExpireTime = 0;
@@ -664,6 +676,10 @@ public class PgMapView extends View {
             selectedCol = col;
             selectedRow = row;
             selectedUnit = null;
+            if (engine != null) {
+                engine.lastSelectedCol = col;
+                engine.lastSelectedRow = row;
+            }
             reachableHexes.clear();
             validTargets.clear();
             if (listener != null) {

@@ -130,6 +130,8 @@ public class PgGameEngine {
         public boolean eastDefeated;
         public boolean lowCountriesLost;
         public boolean playerPlayingAllied;
+        public Integer selectedCol;
+        public Integer selectedRow;
     }
 
     public interface AiTurnCallback {
@@ -183,6 +185,8 @@ public class PgGameEngine {
 
     public boolean isPlayerTurn = true;
     public int scenarioOutcome = 0; // 0=Ongoing, 1=Decisive Victory, 2=Marginal Victory, 3=Loss
+    public int lastSelectedCol = -1;
+    public int lastSelectedRow = -1;
 
     public final List<PgDatabase.ActiveUnit> units = new CopyOnWriteArrayList<>();
     public final List<PgDatabase.ActiveUnit> coreUnits = new CopyOnWriteArrayList<>();
@@ -736,5 +740,45 @@ public class PgGameEngine {
 
     public String getSaveSummary(Context ctx, int slot) {
         return saveManager.getSaveSummary(ctx, slot);
+    }
+
+    public void saveGameCache(Context ctx) throws IOException {
+        saveManager.saveGameCache(ctx);
+    }
+
+    public void saveGameCache(File dir) throws IOException {
+        saveManager.saveGameCache(dir);
+    }
+
+    public boolean hasGameCache(Context ctx) {
+        return saveManager.hasGameCache(ctx);
+    }
+
+    public boolean hasGameCache(File dir) {
+        return saveManager.hasGameCache(dir);
+    }
+
+    public boolean loadGameCache(Context ctx) {
+        return saveManager.loadGameCache(ctx);
+    }
+
+    public boolean loadGameCache(File dir) {
+        return saveManager.loadGameCache(dir);
+    }
+
+    public void clearGameCache(Context ctx) {
+        saveManager.clearGameCache(ctx);
+    }
+
+    public void clearGameCache(File dir) {
+        saveManager.clearGameCache(dir);
+    }
+
+    public String getGameCacheSummary(Context ctx) {
+        return saveManager.getGameCacheSummary(ctx);
+    }
+
+    public String getGameCacheSummary(File dir) {
+        return saveManager.getGameCacheSummary(dir);
     }
 }
