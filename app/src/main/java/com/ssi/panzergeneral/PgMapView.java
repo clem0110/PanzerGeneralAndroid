@@ -823,22 +823,26 @@ public class PgMapView extends View {
 
                 // Campaign core deployment highlight
                 if (engine.isDeploymentPhase) {
+                    boolean isSpecificDeploySpot = false;
                     if (pendingDeployCoreUnit != null) {
                         for (int[] ds : coreDeploySpots) {
                             if (ds[0] == c && ds[1] == r) {
-                                highlightFillPaint.setColor(0x5500E5FF);
-                                canvas.drawPath(hexPath, highlightFillPaint);
-                                hexStrokePaint.setColor(0xFF00E5FF);
-                                hexStrokePaint.setStrokeWidth(2.4f);
-                                canvas.drawPath(hexPath, hexStrokePaint);
+                                isSpecificDeploySpot = true;
                                 break;
                             }
                         }
-                    } else if (cell.isDeployHex && !engine.isHexBlockedByEnemyNearBase(c, r, true)) {
-                        highlightFillPaint.setColor(0x30FFD54F);
+                    }
+                    if (isSpecificDeploySpot) {
+                        highlightFillPaint.setColor(0x5500E5FF);
                         canvas.drawPath(hexPath, highlightFillPaint);
-                        hexStrokePaint.setColor(0xCCFFD54F);
-                        hexStrokePaint.setStrokeWidth(1.8f);
+                        hexStrokePaint.setColor(0xFF00E5FF);
+                        hexStrokePaint.setStrokeWidth(2.4f);
+                        canvas.drawPath(hexPath, hexStrokePaint);
+                    } else if (cell.isDeployHex && !engine.isHexBlockedByEnemyNearBase(c, r, true)) {
+                        highlightFillPaint.setColor(0x24FFD54F);
+                        canvas.drawPath(hexPath, highlightFillPaint);
+                        hexStrokePaint.setColor(0x80FFD54F);
+                        hexStrokePaint.setStrokeWidth(1.6f);
                         canvas.drawPath(hexPath, hexStrokePaint);
                     }
                 }

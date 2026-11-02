@@ -450,10 +450,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         btnRoster = createCompactButton("ROSTER", 0xFF2E5A44);
         btnRoster.setOnClickListener(v -> {
-            if (isAiTurnRunning) return;
+            if (isAiTurnRunning || engine.isDeploymentPhase) return;
             sounds.playClick();
             showUnitRosterDialog();
         });
+        btnRoster.setVisibility(engine.isDeploymentPhase ? View.GONE : View.VISIBLE);
         topBar.addView(btnRoster);
 
         Button btnStratMap = createCompactButton("STRAT MAP", 0xFF2C3E50);
@@ -564,14 +565,26 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 Toast.makeText(this, "Holding current position.", Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (engine.isDeploymentPhase && mapView.selectedUnit != null && mapView.selectedUnit.isAxis && mapView.selectedUnit.isCore) {
+            if (engine.isDeploymentPhase && mapView.selectedUnit != null && engine.isPlayerUnit(mapView.selectedUnit) && mapView.selectedUnit.isCore) {
                 PgDatabase.ActiveUnit u = mapView.selectedUnit;
                 if (engine.undeployCoreUnit(u)) {
                     sounds.playSelect();
-                    mapView.selectedUnit = null;
+                    mapView.pendingDeployCoreUnit = u;
+                    mapView.selectedUnit = u;
+                    mapView.selectedCol = -1;
+                    mapView.selectedRow = -1;
+                    mapView.reachableHexes.clear();
+                    mapView.validTargets.clear();
+                    PgDatabase.UnitDef uDef = db.equipment.get(u.unitDefId);
+                    if (uDef != null) {
+                        mapView.airModePreferred = uDef.isAir();
+                        if (btnAirToggle != null) {
+                            btnAirToggle.setText(uDef.isAir() ? "AIR TOP" : "GND TOP");
+                        }
+                    }
                     refreshHud();
                     mapView.invalidate();
-                    Toast.makeText(this, "Returned " + db.equipment.get(u.unitDefId).name + " to Reserve Pool.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Returned " + (uDef != null ? uDef.name : "Unit") + " to Reserve Pool (tap cyan hex to re-deploy).", Toast.LENGTH_SHORT).show();
                 }
                 return;
             }
@@ -1049,14 +1062,16 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 heldObj, engine.scenario.objectives.size()));
 
         if (btnRoster != null) {
-            int playerCount = 0;
-            for (PgDatabase.ActiveUnit au : engine.units) {
-                if (au != null && engine.isPlayerUnit(au) && au.strength > 0) playerCount++;
-            }
             if (engine.isDeploymentPhase) {
-                playerCount += engine.unplacedCoreUnits.size();
+                btnRoster.setVisibility(View.GONE);
+            } else {
+                btnRoster.setVisibility(View.VISIBLE);
+                int playerCount = 0;
+                for (PgDatabase.ActiveUnit au : engine.units) {
+                    if (au != null && engine.isPlayerUnit(au) && au.strength > 0) playerCount++;
+                }
+                btnRoster.setText("ROSTER (" + playerCount + ")");
             }
-            btnRoster.setText("ROSTER (" + playerCount + ")");
         }
 
         updateUnitInspector(mapView.selectedCol, mapView.selectedRow, mapView.selectedUnit);
@@ -1145,7 +1160,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
             if (engine.isDeploymentPhase) {
                 setUnitActionButtonAvailable(btnUndo, false);
-                boolean canUndeploy = u.isAxis && u.isCore && u.col >= 0 && u.row >= 0;
+                boolean canUndeploy = engine.isPlayerUnit(u) && u.isCore && u.col >= 0 && u.row >= 0;
                 if (canUndeploy) {
                     btnSupply.setText("UNDEPLOY");
                     updateCompactButtonColor(btnSupply, 0xFFD32F2F);
@@ -1390,18 +1405,69 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         if (unit == null) return;
         if (engine.deployCoreUnit(unit, col, row)) {
             sounds.playSelect();
-            mapView.pendingDeployCoreUnit = null;
-            mapView.selectUnit(unit);
-            refreshHud();
-            mapView.invalidate();
             boolean inSea = unit.inSeaTransport;
             boolean isAir = db.equipment.get(unit.unitDefId).isAir();
             boolean isWater = engine.scenario != null && engine.scenario.grid[col][row].isWater();
             String tag = inSea ? " [Naval Transport]" : (isAir && isWater ? " [Airborne Over Sea]" : "");
             String msg = "Deployed " + db.equipment.get(unit.unitDefId).name + " at (" + col + "," + row + ")" + tag;
-            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+
+            // Automatically pick the next unit in the reserve list to deploy
+            PgDatabase.ActiveUnit nextUnit = null;
+            if (!engine.unplacedCoreUnits.isEmpty()) {
+                for (PgDatabase.ActiveUnit candidate : engine.unplacedCoreUnits) {
+                    if (candidate != null && !engine.getValidCoreDeploymentHexes(candidate).isEmpty()) {
+                        nextUnit = candidate;
+                        break;
+                    }
+                }
+                if (nextUnit == null) {
+                    nextUnit = engine.unplacedCoreUnits.get(0);
+                }
+            }
+
+            if (nextUnit != null) {
+                mapView.pendingDeployCoreUnit = nextUnit;
+                mapView.selectedUnit = nextUnit;
+                mapView.selectedCol = -1;
+                mapView.selectedRow = -1;
+                mapView.reachableHexes.clear();
+                mapView.validTargets.clear();
+
+                PgDatabase.UnitDef nextDef = db.equipment.get(nextUnit.unitDefId);
+                if (nextDef != null) {
+                    mapView.airModePreferred = nextDef.isAir();
+                    if (btnAirToggle != null) {
+                        btnAirToggle.setText(nextDef.isAir() ? "AIR TOP" : "GND TOP");
+                    }
+                }
+
+                String nextName = nextDef != null ? nextDef.name : "Unit";
+                Toast.makeText(this, msg + "\nNext to deploy: " + nextName + " (" + engine.unplacedCoreUnits.size() + " in reserve)", Toast.LENGTH_SHORT).show();
+            } else {
+                mapView.pendingDeployCoreUnit = null;
+                mapView.selectUnit(unit);
+                if (engine.unplacedCoreUnits.isEmpty()) {
+                    Toast.makeText(this, msg + "\n★ All core units deployed! Tap START BATTLE to begin. ★", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+                }
+            }
+            refreshHud();
+            mapView.invalidate();
         } else {
-            Toast.makeText(this, "Cannot deploy core unit on that hex.", Toast.LENGTH_SHORT).show();
+            // Hex was not valid for deploying this unit.
+            // Check if player tapped an already deployed player unit to select / inspect / undeploy it:
+            PgDatabase.ActiveUnit existing = engine.getUnitAt(col, row, false);
+            if (existing == null) existing = engine.getUnitAt(col, row, true);
+            if (existing != null && engine.isPlayerUnit(existing)) {
+                sounds.playSelect();
+                mapView.pendingDeployCoreUnit = null;
+                mapView.selectUnit(existing);
+                refreshHud();
+                mapView.invalidate();
+                return;
+            }
+            Toast.makeText(this, "Cannot deploy on that hex. Tap a highlighted deployment hex.", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1421,6 +1487,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     .setPositiveButton("Begin Turn 1", (d, w) -> {
                         engine.startBattleAfterDeployment();
                         sounds.playSelect();
+                        mapView.pendingDeployCoreUnit = null;
                         refreshHud();
                         mapView.invalidate();
                         mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
@@ -1435,6 +1502,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                     .setPositiveButton("Start Battle", (d, w) -> {
                         engine.startBattleAfterDeployment();
                         sounds.playSelect();
+                        mapView.pendingDeployCoreUnit = null;
                         refreshHud();
                         mapView.invalidate();
                         mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
@@ -1546,6 +1614,35 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         btnClose.setOnClickListener(v -> {
             sounds.playClick();
             dialog.dismiss();
+            if (mapView.pendingDeployCoreUnit == null && !engine.unplacedCoreUnits.isEmpty()) {
+                PgDatabase.ActiveUnit first = null;
+                for (PgDatabase.ActiveUnit c : engine.unplacedCoreUnits) {
+                    if (c != null && !engine.getValidCoreDeploymentHexes(c).isEmpty()) {
+                        first = c;
+                        break;
+                    }
+                }
+                if (first == null) first = engine.unplacedCoreUnits.get(0);
+                mapView.pendingDeployCoreUnit = first;
+                mapView.selectedUnit = first;
+                mapView.selectedCol = -1;
+                mapView.selectedRow = -1;
+                mapView.reachableHexes.clear();
+                mapView.validTargets.clear();
+                PgDatabase.UnitDef fDef = db.equipment.get(first.unitDefId);
+                if (fDef != null) {
+                    mapView.airModePreferred = fDef.isAir();
+                    if (btnAirToggle != null) {
+                        btnAirToggle.setText(fDef.isAir() ? "AIR TOP" : "GND TOP");
+                    }
+                }
+                refreshHud();
+                mapView.invalidate();
+                String fName = fDef != null ? fDef.name : "Unit";
+                Toast.makeText(MainActivity.this,
+                        "Ready to deploy: " + fName + " (tap cyan hex)",
+                        Toast.LENGTH_SHORT).show();
+            }
         });
         headerRow.addView(btnClose, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 60));
         root.addView(headerRow);
@@ -1777,6 +1874,16 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                             sounds.playClick();
                             dialog.dismiss();
                             mapView.pendingDeployCoreUnit = u;
+                            mapView.selectedUnit = u;
+                            mapView.selectedCol = -1;
+                            mapView.selectedRow = -1;
+                            mapView.reachableHexes.clear();
+                            mapView.validTargets.clear();
+                            mapView.airModePreferred = def.isAir();
+                            if (btnAirToggle != null) {
+                                btnAirToggle.setText(def.isAir() ? "AIR TOP" : "GND TOP");
+                            }
+                            refreshHud();
                             mapView.invalidate();
                             Toast.makeText(MainActivity.this,
                                     "Tap any highlighted deployment hex (cyan) to place " + def.name,
@@ -1788,6 +1895,16 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                             sounds.playClick();
                             dialog.dismiss();
                             mapView.pendingDeployCoreUnit = u;
+                            mapView.selectedUnit = u;
+                            mapView.selectedCol = -1;
+                            mapView.selectedRow = -1;
+                            mapView.reachableHexes.clear();
+                            mapView.validTargets.clear();
+                            mapView.airModePreferred = def.isAir();
+                            if (btnAirToggle != null) {
+                                btnAirToggle.setText(def.isAir() ? "AIR TOP" : "GND TOP");
+                            }
+                            refreshHud();
                             mapView.invalidate();
                             Toast.makeText(MainActivity.this,
                                     "Tap any highlighted deployment hex (cyan) to place " + def.name,
@@ -1890,7 +2007,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     }
 
     public void showUnitRosterDialog() {
-        if (engine.scenario == null || isAiTurnRunning) return;
+        if (engine.scenario == null || isAiTurnRunning || engine.isDeploymentPhase) return;
 
         final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -4100,8 +4217,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         List<String> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
 
-        labels.add("Scenario Unit Roster (Move & Attack Status)");
-        actions.add(this::showUnitRosterDialog);
+        if (!engine.isDeploymentPhase) {
+            labels.add("Scenario Unit Roster (Move & Attack Status)");
+            actions.add(this::showUnitRosterDialog);
+        }
 
         if (mapView.selectedUnit != null) {
             final PgDatabase.ActiveUnit selUnit = mapView.selectedUnit;
