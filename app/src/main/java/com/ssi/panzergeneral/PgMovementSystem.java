@@ -437,9 +437,16 @@ public class PgMovementSystem {
 
         engine.scenario.grid[engine.lastUndoState.destCol][engine.lastUndoState.destRow].ownerNation = engine.lastUndoState.prevDestOwnerNation;
         engine.axisPrestige = engine.lastUndoState.prevAxisPrestige;
+        engine.alliedPrestige = engine.lastUndoState.prevAlliedPrestige;
         if (engine.lastUndoState.capturedNewHex) {
             int hexKey = (engine.lastUndoState.destCol << 8) | engine.lastUndoState.destRow;
-            engine.axisCapturedHexes.remove(hexKey);
+            if (u.isAxis) {
+                engine.axisCapturedHexes.remove(hexKey);
+                engine.alliedLostHexes.remove(hexKey);
+            } else {
+                engine.alliedCapturedHexes.remove(hexKey);
+                engine.axisLostHexes.remove(hexKey);
+            }
         }
         engine.lastUndoState = null;
         recalculateFogOfWar();
@@ -474,7 +481,7 @@ public class PgMovementSystem {
         }
 
         int hexKey = (destCol << 8) | destRow;
-        boolean wasNewHex = !engine.axisCapturedHexes.contains(hexKey);
+        boolean wasNewHex = u.isAxis ? !engine.axisCapturedHexes.contains(hexKey) : !engine.alliedCapturedHexes.contains(hexKey);
 
         PgGameEngine.UndoMoveState undo = PgGameEngine.UndoMoveState.builder()
                 .unit(u)
@@ -493,6 +500,7 @@ public class PgMovementSystem {
                 .destRow(destRow)
                 .prevDestOwnerNation(engine.scenario.grid[destCol][destRow].ownerNation)
                 .prevAxisPrestige(engine.axisPrestige)
+                .prevAlliedPrestige(engine.alliedPrestige)
                 .capturedNewHex(wasNewHex)
                 .build();
 

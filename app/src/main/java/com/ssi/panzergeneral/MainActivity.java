@@ -3173,7 +3173,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         } else {
             info.append("High Command offers you a strategic choice for your next operation.\n\n");
         }
-        info.append("Available Prestige Treasury: ").append(engine.axisPrestige + step.bonusPrestige);
+        info.append("Available Prestige Treasury: ").append(engine.getPlayerPrestige() + step.bonusPrestige);
         tvBrief.setText(info.toString());
         tvBrief.setTextSize(15f);
         tvBrief.setPadding(0, 0, 0, 20);
@@ -3751,7 +3751,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 priceCol.setGravity(Gravity.CENTER);
                 priceCol.setPadding(14, 8, 14, 8);
                 GradientDrawable priceBg = new GradientDrawable();
-                boolean affordable = (engine.axisPrestige >= u.cost);
+                boolean affordable = (engine.getPlayerPrestige() >= u.cost);
                 priceBg.setColor(affordable ? 0xFF28472C : 0xFF3E2723);
                 priceBg.setCornerRadius(8f);
                 priceBg.setStroke(1, affordable ? 0xFF81C784 : 0xFFE57373);
@@ -3950,7 +3950,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             }
 
             final int finalTotalCost = sel.cost + transportAddonCost;
-            boolean canBuyTotal = (engine.axisPrestige >= finalTotalCost);
+            boolean canBuyTotal = (engine.getPlayerPrestige() >= finalTotalCost);
             String trpSuffix = (selectedTransportId > 0 && selectedTransportId < db.equipment.size())
                     ? (" + " + db.equipment.get(selectedTransportId).name) : "";
 
@@ -3959,7 +3959,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                             ? String.format(Locale.ROOT, "REQUISITION & DEPLOY %s%s  —  ★ %d PRESTIGE",
                                     sel.name.toUpperCase(Locale.ROOT), trpSuffix, finalTotalCost)
                             : String.format(Locale.ROOT, "INSUFFICIENT PRESTIGE (NEED ★ %d, HAVE ★ %d)",
-                                    finalTotalCost, engine.axisPrestige),
+                                    finalTotalCost, engine.getPlayerPrestige()),
                     canBuyTotal ? 0xFF2E6B36 : 0xFF455A64,
                     canBuyTotal ? 0xFFFFF59D : 0xFFCFD8DC);
             LinearLayout.LayoutParams buyBtnLp = new LinearLayout.LayoutParams(
@@ -3967,7 +3967,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             buyBtnLp.setMargins(0, 8, 0, 4);
             btnConfirmBuy.setLayoutParams(buyBtnLp);
             btnConfirmBuy.setOnClickListener(v -> {
-                if (engine.axisPrestige < finalTotalCost) {
+                if (engine.getPlayerPrestige() < finalTotalCost) {
                     Toast.makeText(this, "Insufficient Prestige (" + finalTotalCost + "★ required).", Toast.LENGTH_SHORT).show();
                     return;
                 }
@@ -4428,7 +4428,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
                 // Right Cost Badge
                 int chassisUpgCost = (cand.id == u.unitDefId) ? 0 : Math.max(20, cand.cost - (currentDef.cost / 2));
-                boolean affordable = (engine.axisPrestige >= chassisUpgCost);
+                boolean affordable = (engine.getPlayerPrestige() >= chassisUpgCost);
 
                 LinearLayout priceCol = new LinearLayout(this);
                 priceCol.setOrientation(LinearLayout.VERTICAL);
@@ -4636,7 +4636,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             }
 
             final int finalTotalCost = engine.getUpgradeCost(u, sel.id, curSelectedTransportId[0]);
-            boolean canAfford = (engine.axisPrestige >= finalTotalCost);
+            boolean canAfford = (engine.getPlayerPrestige() >= finalTotalCost);
             boolean noChange = (sel.id == u.unitDefId && curSelectedTransportId[0] == u.transportDefId);
 
             String trpSuffix = (curSelectedTransportId[0] > 0 && curSelectedTransportId[0] < db.equipment.size())
@@ -4657,7 +4657,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                 btnTextColor = 0xFFFFF59D;
             } else {
                 btnLabel = String.format(Locale.ROOT, "INSUFFICIENT PRESTIGE (NEED ★ %d, HAVE ★ %d)",
-                        finalTotalCost, engine.axisPrestige);
+                        finalTotalCost, engine.getPlayerPrestige());
                 btnBgColor = 0xFF455A64;
                 btnTextColor = 0xFFCFD8DC;
             }
