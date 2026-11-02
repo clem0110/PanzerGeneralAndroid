@@ -87,10 +87,11 @@ public class PgSaveManager {
 
     public boolean importStreamToSlot(Context ctx, InputStream is, int slot) {
         File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
-        try (FileOutputStream fos = new FileOutputStream(f)) {
+        try (InputStream compIs = createCompatibleInputStream(is);
+             FileOutputStream fos = new FileOutputStream(f)) {
             byte[] buf = new byte[8192];
             int read;
-            while ((read = is.read(buf)) != -1) {
+            while ((read = compIs.read(buf)) != -1) {
                 fos.write(buf, 0, read);
             }
             fos.flush();
@@ -101,8 +102,56 @@ public class PgSaveManager {
         }
     }
 
+    public static InputStream createCompatibleInputStream(InputStream in) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) != -1) {
+            baos.write(buf, 0, n);
+        }
+        byte[] data = baos.toByteArray();
+
+        // Search for "com.ssi.panzergeneral.PgGameEngine$SaveState"
+        byte[] marker = "com.ssi.panzergeneral.PgGameEngine$SaveState".getBytes("UTF-8");
+        byte[] altSuidBytes = new byte[] {
+            (byte) 0xFA, (byte) 0x82, (byte) 0xBD, (byte) 0x02,
+            (byte) 0x97, (byte) 0x85, (byte) 0x24, (byte) 0xE9
+        }; // -395545998425512727L
+        byte[] origSuidBytes = new byte[] {
+            (byte) 0xD8, (byte) 0x2D, (byte) 0x38, (byte) 0x92,
+            (byte) 0x1E, (byte) 0x0B, (byte) 0x77, (byte) 0x4F
+        }; // -2869575187344689329L
+
+        for (int i = 0; i <= data.length - marker.length - 8; i++) {
+            boolean match = true;
+            for (int j = 0; j < marker.length; j++) {
+                if (data[i + j] != marker[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                int suidPos = i + marker.length;
+                boolean altMatch = true;
+                for (int k = 0; k < 8; k++) {
+                    if (data[suidPos + k] != altSuidBytes[k]) {
+                        altMatch = false;
+                        break;
+                    }
+                }
+                if (altMatch) {
+                    for (int k = 0; k < 8; k++) {
+                        data[suidPos + k] = origSuidBytes[k];
+                    }
+                }
+                break;
+            }
+        }
+        return new ByteArrayInputStream(data);
+    }
+
     public boolean loadGameFromStream(InputStream is) {
-        try (ObjectInputStream ois = new ObjectInputStream(is)) {
+        try (ObjectInputStream ois = new ObjectInputStream(createCompatibleInputStream(is))) {
             PgGameEngine.SaveState st = (PgGameEngine.SaveState) ois.readObject();
             engine.isCampaignMode = st.isCampaign;
             engine.playerIsAxis = !st.playerPlayingAllied;
@@ -188,7 +237,7 @@ public class PgSaveManager {
     public String getSaveSummary(Context ctx, int slot) {
         File f = new File(ctx.getFilesDir(), "pg_save_" + slot + ".dat");
         if (!f.exists()) return "Slot " + slot + ": [Empty]";
-        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(f))) {
+        try (ObjectInputStream ois = new ObjectInputStream(createCompatibleInputStream(new FileInputStream(f)))) {
             PgGameEngine.SaveState st = (PgGameEngine.SaveState) ois.readObject();
             return String.format(Locale.ROOT, "Slot %d: %s (Turn %d/%d) - %s",
                     slot, st.scenarioTitle, st.turn, st.maxTurns, st.saveTimestamp);
@@ -265,7 +314,7 @@ public class PgSaveManager {
     public String getGameCacheSummary(File dir) {
         File f = new File(dir, CACHE_FILE_NAME);
         if (!f.exists()) return null;
-        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(f))) {
+        try (ObjectInputStream ois = new ObjectInputStream(createCompatibleInputStream(new FileInputStream(f)))) {
             PgGameEngine.SaveState st = (PgGameEngine.SaveState) ois.readObject();
             String side = st.playerPlayingAllied ? "Allied" : "Axis";
             return String.format(Locale.ROOT, "%s [%s] (Turn %d/%d)",

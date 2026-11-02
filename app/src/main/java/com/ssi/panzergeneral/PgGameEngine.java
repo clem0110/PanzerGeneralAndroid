@@ -96,7 +96,7 @@ public class PgGameEngine {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SaveState implements Serializable {
-        private static final long serialVersionUID = -395545998425512727L;
+        private static final long serialVersionUID = -2869575187344689329L;
         public boolean isCampaign;
         public int campaignEntryIndex;
         public int currentScenarioNumber;
