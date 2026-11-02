@@ -1552,7 +1552,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF141915);
-        root.setPadding(20, 14, 20, 14);
+        root.setPadding(20, 14, 20, 20);
 
         // Header
         LinearLayout headerRow = new LinearLayout(this);
@@ -2092,7 +2092,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF141915);
-        root.setPadding(20, 14, 20, 14);
+        root.setPadding(20, 14, 20, 20);
 
         // Header Bar
         LinearLayout headerRow = new LinearLayout(this);
@@ -2789,7 +2789,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF141915);
-        root.setPadding(20, 14, 20, 14);
+        root.setPadding(20, 14, 20, 20);
 
         // Header Bar
         LinearLayout headerRow = new LinearLayout(this);
@@ -2828,6 +2828,20 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         tvSubHeader.setTextSize(11.5f);
         titleStack.addView(tvSubHeader);
         headerRow.addView(titleStack, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button btnCloseHeader = createCompactButton("✕ CLOSE", 0xFF7F2424);
+        btnCloseHeader.setTextColor(Color.WHITE);
+        btnCloseHeader.setTextSize(12f);
+        btnCloseHeader.setPadding(18, 10, 18, 10);
+        btnCloseHeader.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams closeHdrLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeHdrLp.setMargins(14, 0, 0, 0);
+        btnCloseHeader.setLayoutParams(closeHdrLp);
+        headerRow.addView(btnCloseHeader);
 
         root.addView(headerRow, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2919,21 +2933,50 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         // Footer Bar
         LinearLayout footerRow = new LinearLayout(this);
         footerRow.setOrientation(LinearLayout.HORIZONTAL);
-        footerRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        footerRow.setPadding(0, 10, 0, 0);
+        footerRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        footerRow.setPadding(0, 12, 8, 16);
 
-        Button btnDismiss = createCompactButton("⚔️ RESUME BATTLE / PROCEED", 0xFFC5A059);
-        btnDismiss.setTextColor(0xFF1B221D);
-        btnDismiss.setTypeface(Typeface.DEFAULT_BOLD);
+        Button btnCloseFooter = createCompactButton("✕ CLOSE", 0xFF7F2424);
+        btnCloseFooter.setTextColor(Color.WHITE);
+        btnCloseFooter.setTextSize(12.5f);
+        btnCloseFooter.setPadding(24, 12, 24, 12);
+        btnCloseFooter.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams closeFooterLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeFooterLp.setMargins(0, 0, 14, 0);
+        btnCloseFooter.setLayoutParams(closeFooterLp);
+        footerRow.addView(btnCloseFooter);
+
+        Button btnDismiss = createStyledButton("⚔️ RESUME BATTLE / PROCEED", 0xFFC5A059, 0xFF1B221D);
+        btnDismiss.setTextSize(13f);
+        btnDismiss.setPadding(26, 12, 26, 12);
         btnDismiss.setOnClickListener(v -> {
             sounds.playSelect();
             dialog.dismiss();
         });
-        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 64);
-        footerRow.addView(btnDismiss, btnLp);
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnDismiss.setLayoutParams(btnLp);
+        footerRow.addView(btnDismiss);
 
         root.addView(footerRow, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        dialog.setOnShowListener(d -> {
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_FULLSCREEN);
+            }
+        });
+        dialog.setOnDismissListener(d -> hideSystemBars());
 
         dialog.setContentView(root);
         dialog.show();
@@ -3477,7 +3520,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF141915);
-        root.setPadding(20, 14, 20, 14);
+        root.setPadding(20, 14, 20, 20);
 
         // 1. Top Command Header Bar
         LinearLayout headerRow = new LinearLayout(this);
