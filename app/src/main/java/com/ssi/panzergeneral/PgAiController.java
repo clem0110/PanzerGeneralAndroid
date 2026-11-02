@@ -741,10 +741,10 @@ public class PgAiController {
 
         // =========================================================================
         // PHASE 9: Smart AI Reinforcements / Prestige Spending
-        // In Campaign mode, AI reserves its prestige strictly for replacements (authentic SSI rules).
-        // In Scenario mode, AI may requisition at most 1 unit per turn if prestige >= 100.
+        // Requisition new units if AI has available prestige and valid unblocked deployment hexes.
+        // Natural constraints: AI prestige bank, unblocked friendly supply hexes, and unit cost.
         // =========================================================================
-        if (engine.scenario != null && !engine.isCampaignMode && engine.getAiPrestige() >= 100) {
+        if (engine.scenario != null && engine.getAiPrestige() >= 50) {
             List<PgDatabase.UnitDef> candidateDefs = new ArrayList<>();
             Set<Integer> seenDefIds = new HashSet<>();
             for (PgDatabase.ActiveUnit initU : engine.scenario.initialUnits) {
@@ -787,7 +787,7 @@ public class PgAiController {
                 }
             }
 
-            int maxPurchasesThisTurn = 1;
+            int maxPurchasesThisTurn = 10;
             int purchasesDone = 0;
 
             while (purchasesDone < maxPurchasesThisTurn) {
