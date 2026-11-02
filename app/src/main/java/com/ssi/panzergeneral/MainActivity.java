@@ -231,13 +231,18 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         btnEncyclopedia.setOnClickListener(v -> {
             sounds.playClick();
             new AlertDialog.Builder(this)
-                    .setTitle("Reference Library")
+                    .setTitle("Reference Library & Documentation")
                     .setItems(new String[]{
-                        "Panzer General Instruction Manual & Tactical Rules",
-                        "Equipment Encyclopedia (All 425 Units)"
+                        "📖 Official Instruction Manual & Tactical Rules",
+                        "🎖️ Official SSI Strategy Guide (Tactics & Combined Arms)",
+                        "🗺️ Campaign Operations Compendium & Scenario Notes",
+                        "⚔️ Equipment Encyclopedia (All 425 Units)"
                     }, (d, which) -> {
-                        if (which == 0) showFieldManualDialog();
-                        else showEncyclopediaDialog();
+                        sounds.playSelect();
+                        if (which == 0) showFieldManualDialog(0);
+                        else if (which == 1) showFieldManualDialog(1);
+                        else if (which == 2) showFieldManualDialog(2);
+                        else if (which == 3) showEncyclopediaDialog();
                     })
                     .setNegativeButton("Close", null)
                     .show();
@@ -4173,44 +4178,407 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         dialog.show();
     }
 
-    private void showFieldManualDialog() {
-        ScrollView scroll = new ScrollView(this);
-        TextView tv = new TextView(this);
-        tv.setPadding(42, 28, 42, 28);
-        tv.setTextSize(13.5f);
-        tv.setTextColor(0xFFECEFF1);
-        tv.setBackgroundColor(0xFF1A211C);
-        tv.setText(
-                "PANZER GENERAL — OFFICIAL FIELD MANUAL & TACTICAL RULES\n\n" +
-                "1. FLEXIBLE TURN ORDER (MOVE & ATTACK IN EITHER ORDER)\n" +
-                "• Every unit has 1 Movement Allowance and 1 Attack per turn in either order.\n" +
-                "• You may Attack first and then Move afterwards, or Move and then Attack.\n" +
-                "• If a unit uses only part of its movement allowance before attacking, it may continue moving with its remaining movement points after the attack.\n" +
-                "• UNDO: If a move does not uncover any hidden enemy units, tap UNDO to return the unit to its previous hex.\n\n" +
-                "2. INITIATIVE, FIRST STRIKE & TERRAIN INITIATIVE CAPS\n" +
-                "• In combat, Effective Initiative = Unit Initiative + Experience Stars (1★–5★).\n" +
-                "• Close Terrain caps non-infantry Initiative: Cities & Fortifications cap Initiative at 1; Forests, Mountains, Swamps & Bocage cap at 2; Rough caps at 3. Infantry gains +2 Initiative in close terrain.\n" +
-                "• Each point of Initiative advantage grants 20% First Strike fire before the enemy can shoot back.\n\n" +
-                "3. SPECIAL UNIT ABILITIES\n" +
-                "• TANK OVERRUN: When a Tank destroys a weakened enemy ground unit in close combat with 0 losses to the Tank, it triggers an OVERRUN — letting you choose whether and where to move while retaining its attack to strike again!\n" +
-                "• RUGGED DEFENSE & PIONIERE: Entrenched defenders can trigger Rugged Defense, inflicting heavy casualties. Pioneer / Engineer units ignore enemy Rugged Defense and strip 2x entrenchment.\n" +
-                "• BRIDGE ENGINEERS: A Bridge Engineer standing on a River hex forms a Pontoon Bridge — friendly units cross for 1 MP and suffer no river combat penalties.\n" +
-                "• DEFENSIVE ARTILLERY & FIGHTER INTERCEPTORS: Friendly Artillery (range ≥ 2) automatically fires defensive support when an adjacent friendly ground unit is assaulted. Friendly Fighters automatically intercept enemy air attacks on adjacent hexes.\n" +
-                "• LEVEL BOMBERS: Strategic bombing suppresses defenders, strips 2 entrenchment, and destroys 25% of target Fuel & Ammo.\n" +
-                "• FORCED RETREAT & SURRENDER: Heavy losses force a defender to retreat. If all retreat hexes are blocked by units, impassable terrain, or enemy Zones of Control (ZOC), the unit SURRENDERS!\n\n" +
-                "4. SUPPLY, REPLACEMENTS, OVERSTRENGTH, UPGRADE & DISBAND\n" +
-                "• SUPPLY: Resupply restores 100% Fuel/Ammo in friendly Cities/Ports/Airfields, 75% in open terrain, or 25% when adjacent to an enemy. Air units refuel automatically over friendly Airfields or adjacent to Carriers.\n" +
-                "• REPLACEMENTS & OVERSTRENGTH (11–15): Regular Replacements (REPL) restore strength to 10 (diluting experience). Elite Replacements (ELITE+ / OVRST+) preserve experience and allow veteran units (1★–5★) to Overstrength up to 10 + Stars (max 15)!\n" +
-                "• UPGRADE & DISBAND: Units on friendly Supply Points with no adjacent enemies can UPGRADE to newer equipment. Tapping the bottom unit dossier also allows DISBANDING a unit for a 50% Prestige refund.\n" +
-                "• AIRLIFT & SEA TRANSPORT: Infantry on a friendly Airfield can embark into Ju 52 Air Transport (AIRLIFT) and PARADROP. Ground units on a friendly Port can embark into Naval Transport (SEA EMBARK) and DISEMBARK on coasts."
-        );
-        scroll.addView(tv);
+    public void showFieldManualDialog() {
+        showFieldManualDialog(0);
+    }
 
-        new AlertDialog.Builder(this)
-                .setTitle("Panzer General — Instruction Manual & Tactical Rules")
-                .setView(scroll)
-                .setPositiveButton("Understood", null)
-                .show();
+    public void showFieldManualDialog(final int initialTab) {
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF131A15);
+        root.setPadding(20, 14, 20, 14);
+
+        // Header Row
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(16, 10, 16, 10);
+        GradientDrawable hdrBg = new GradientDrawable();
+        hdrBg.setColor(0xFF1F2721);
+        hdrBg.setCornerRadius(10f);
+        hdrBg.setStroke(2, 0xFFC5A059);
+        headerRow.setBackground(hdrBg);
+
+        ImageView ivFlag = new ImageView(this);
+        Bitmap flagBmp = assets != null ? assets.getTrimmedSprite("FLAGS.SHP", engine != null ? engine.getPlayerFlagSpriteIndex() : 0) : null;
+        if (flagBmp != null) {
+            ivFlag.setImageBitmap(Bitmap.createScaledBitmap(flagBmp, 48, 36, false));
+        }
+        LinearLayout.LayoutParams flagLp = new LinearLayout.LayoutParams(52, 40);
+        flagLp.setMargins(0, 0, 14, 0);
+        headerRow.addView(ivFlag, flagLp);
+
+        LinearLayout titleStack = new LinearLayout(this);
+        titleStack.setOrientation(LinearLayout.VERTICAL);
+        TextView tvHeaderTitle = new TextView(this);
+        tvHeaderTitle.setText("PANZER GENERAL — MILITARY REFERENCE LIBRARY");
+        tvHeaderTitle.setTextColor(0xFFFFD54F);
+        tvHeaderTitle.setTextSize(15f);
+        tvHeaderTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        titleStack.addView(tvHeaderTitle);
+
+        TextView tvSubHeader = new TextView(this);
+        tvSubHeader.setText("Official SSI 1994 Instruction Manual, Tactical Strategy Guide & Campaign Compendium");
+        tvSubHeader.setTextColor(0xFFB0BEC5);
+        tvSubHeader.setTextSize(11.5f);
+        titleStack.addView(tvSubHeader);
+        headerRow.addView(titleStack, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button btnClose = createCompactButton("✕ CLOSE", 0xFF7F2424);
+        btnClose.setOnClickListener(v -> {
+            sounds.playClick();
+            dialog.dismiss();
+        });
+        headerRow.addView(btnClose, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 60));
+        root.addView(headerRow);
+
+        // Search Bar Row
+        LinearLayout searchRow = new LinearLayout(this);
+        searchRow.setOrientation(LinearLayout.HORIZONTAL);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        searchRow.setPadding(12, 6, 12, 6);
+        GradientDrawable sbBg = new GradientDrawable();
+        sbBg.setColor(0xFF1A221C);
+        sbBg.setCornerRadius(8f);
+        sbBg.setStroke(1, 0xFF37474F);
+        searchRow.setBackground(sbBg);
+        LinearLayout.LayoutParams srp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        srp.setMargins(0, 10, 0, 8);
+
+        final EditText etSearch = new EditText(this);
+        etSearch.setHint("🔍 Search manual, rules, tactics & scenario walkthroughs...");
+        etSearch.setHintTextColor(0xFF78909C);
+        etSearch.setTextColor(0xFFECEFF1);
+        etSearch.setTextSize(13f);
+        etSearch.setBackgroundColor(Color.TRANSPARENT);
+        etSearch.setSingleLine(true);
+        etSearch.setPadding(10, 8, 10, 8);
+        searchRow.addView(etSearch, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button btnClearSearch = createCompactButton("CLEAR", 0xFF37474F);
+        searchRow.addView(btnClearSearch);
+        root.addView(searchRow, srp);
+
+        // Tab Strip
+        LinearLayout tabStrip = new LinearLayout(this);
+        tabStrip.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tslp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tslp.setMargins(0, 0, 0, 8);
+
+        final Button btnTabManual = createCompactButton("📖 INSTRUCTION MANUAL", 0xFF2E7D32);
+        final Button btnTabStrategy = createCompactButton("🎖️ STRATEGY GUIDE", 0xFF263238);
+        final Button btnTabCampaign = createCompactButton("🗺️ CAMPAIGN & SCENARIOS", 0xFF263238);
+
+        LinearLayout.LayoutParams tblp = new LinearLayout.LayoutParams(0, 68, 1f);
+        tblp.setMargins(0, 0, 8, 0);
+        tabStrip.addView(btnTabManual, tblp);
+
+        LinearLayout.LayoutParams tblp2 = new LinearLayout.LayoutParams(0, 68, 1f);
+        tblp2.setMargins(0, 0, 8, 0);
+        tabStrip.addView(btnTabStrategy, tblp2);
+
+        LinearLayout.LayoutParams tblp3 = new LinearLayout.LayoutParams(0, 68, 1f);
+        tabStrip.addView(btnTabCampaign, tblp3);
+        root.addView(tabStrip, tslp);
+
+        // Quick Jump Chips Bar
+        HorizontalScrollView chipScroll = new HorizontalScrollView(this);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        final LinearLayout chipContainer = new LinearLayout(this);
+        chipContainer.setOrientation(LinearLayout.HORIZONTAL);
+        chipContainer.setPadding(0, 2, 0, 2);
+        chipScroll.addView(chipContainer);
+        LinearLayout.LayoutParams cslp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cslp.setMargins(0, 0, 0, 8);
+        root.addView(chipScroll, cslp);
+
+        // Content Area Container
+        FrameLayout contentArea = new FrameLayout(this);
+        LinearLayout.LayoutParams calp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+
+        // 1. Text Viewer ScrollView
+        final ScrollView contentScroll = new ScrollView(this);
+        final TextView tvContent = new TextView(this);
+        tvContent.setPadding(22, 18, 22, 26);
+        tvContent.setTextSize(13f);
+        tvContent.setTextColor(0xFFECEFF1);
+        tvContent.setTypeface(Typeface.MONOSPACE);
+        tvContent.setLineSpacing(0, 1.18f);
+        tvContent.setTextIsSelectable(true);
+        GradientDrawable tvBg = new GradientDrawable();
+        tvBg.setColor(0xFF18201A);
+        tvBg.setCornerRadius(8f);
+        tvBg.setStroke(1, 0xFF2E3D31);
+        tvContent.setBackground(tvBg);
+        contentScroll.addView(tvContent);
+        contentArea.addView(contentScroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // 2. Search Results ScrollView
+        final ScrollView searchScroll = new ScrollView(this);
+        final LinearLayout searchList = new LinearLayout(this);
+        searchList.setOrientation(LinearLayout.VERTICAL);
+        searchList.setPadding(6, 6, 6, 12);
+        searchScroll.addView(searchList);
+        searchScroll.setVisibility(View.GONE);
+        contentArea.addView(searchScroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        root.addView(contentArea, calp);
+
+        final int[] currentTab = {Math.max(0, Math.min(2, initialTab))};
+
+        final Runnable[] scrollToTarget = new Runnable[1];
+        final String[] jumpTarget = new String[1];
+        scrollToTarget[0] = () -> {
+            if (jumpTarget[0] == null) return;
+            String text = tvContent.getText().toString();
+            int idx = text.indexOf(jumpTarget[0]);
+            if (idx >= 0 && tvContent.getLayout() != null) {
+                int line = tvContent.getLayout().getLineForOffset(idx);
+                int y = tvContent.getLayout().getLineTop(line);
+                contentScroll.smoothScrollTo(0, Math.max(0, y - 10));
+            }
+            jumpTarget[0] = null;
+        };
+
+        final Runnable populateChips = () -> {
+            chipContainer.removeAllViews();
+            String[][] chips;
+            if (currentTab[0] == 0) {
+                chips = new String[][]{
+                    {"Ch.1 Command", "CHAPTER 1: PHILOSOPHY"},
+                    {"Ch.2 Map & Grid", "CHAPTER 2: THE BATTLEFIELD"},
+                    {"Ch.3 Movement & ZOC", "CHAPTER 3: MOVEMENT"},
+                    {"Ch.4 12 Classes", "CHAPTER 4: THE 12 UNIT CLASSES"},
+                    {"Ch.5 Combat CRT", "CHAPTER 5: COMBAT MECHANICS"},
+                    {"Ch.6 Rugged Def & Overrun", "CHAPTER 6: RUGGED DEFENSE"},
+                    {"Ch.7 Supply & Overstrength", "CHAPTER 7: SUPPLY"},
+                    {"Ch.8 Upgrading", "CHAPTER 8: UPGRADING EQUIPMENT"},
+                    {"Ch.9 Weather", "CHAPTER 9: THE WEATHER SYSTEM"},
+                    {"Ch.10 Campaign Tree", "CHAPTER 10: PRESTIGE ECONOMY"}
+                };
+            } else if (currentTab[0] == 1) {
+                chips = new String[][]{
+                    {"(1) Key Terms", "(1). Glossary Of Key Terms"},
+                    {"Entrenchment", "Entrenchment\nEntrenchment"},
+                    {"Experience", "Experience\nIn addition"},
+                    {"Prestige Costs", "Prestige Costs\nThe prestige"},
+                    {"Replacements", "Replacements\nDon't let"},
+                    {"Rugged Defense", "Rugged Defense\nThe concept"},
+                    {"Terrain", "Terrain\nCareful"},
+                    {"Weather", "Weather\nBad weather"},
+                    {"(2) Tactical Overview", "(2). Tactical Overview"},
+                    {"Offensive Tactics", "Offensive Tactics"},
+                    {"Defensive Tactics", "Defensive Tactics"},
+                    {"The Air War", "The Air War"},
+                    {"The Naval War", "The Naval War"},
+                    {"(3) Combined Arms", "(3). Combined Arms"},
+                    {"City Assault Walkthrough", "An Example Of A Combined Arms Attack"}
+                };
+            } else {
+                chips = new String[][]{
+                    {"(1) The Campaigns", "(1). The Campaigns."},
+                    {"1939 Campaign", "1939 Campaign"},
+                    {"1941 Western", "1941 Western Campaign"},
+                    {"1943 Western", "1943 Western Campaign"},
+                    {"Eastern Front", "1941 & 1943 Eastern Campaign"},
+                    {"(2) Campaign Notes", "(2). Campaign Notes"},
+                    {"Force Balance", "Campaign Force Balance"},
+                    {"Core vs Aux", "Core Versus Auxiliary Units"},
+                    {"Upgrading", "Upgrading And Elite Replacements"},
+                    {"(3) Scenario Notes", "(3) Scenario Notes"},
+                    {"Poland / Warsaw", "1. POLAND"},
+                    {"Norway", "3. NORWAY"},
+                    {"Low Countries", "4. LOW COUNTRIES"},
+                    {"France", "5. FRANCE"},
+                    {"Sealion", "6, 38 & 11.. SEALION"},
+                    {"North Africa", "7. NORTH AFRICA"},
+                    {"Middle East", "8. MIDDLE EAST"},
+                    {"El Alamein", "9. EL ALAMEIN"},
+                    {"Caucasus", "10. CAUCASUS"},
+                    {"Torch / Husky", "12. TORCH"},
+                    {"Anzio", "14. ANZIO"},
+                    {"D-Day", "15. D-DAY"},
+                    {"Ardennes (Bulge)", "17. ARDENNES"},
+                    {"Market-Garden", "19. MARKET-GARDEN"},
+                    {"Barbarossa", "23. BARBAROSSA"},
+                    {"Kiev", "24. KIEV"},
+                    {"Moscow", "25, 27, 31, & 35. MOSCOW"},
+                    {"Sevastopol", "26. SEVASTOPOL"},
+                    {"Stalingrad", "28. STALINGRAD"},
+                    {"Kursk", "30. KURSK"},
+                    {"Berlin", "35. BERLIN"},
+                    {"Washington", "36. WASHINGTON"}
+                };
+            }
+
+            for (String[] pair : chips) {
+                final String label = pair[0];
+                final String target = pair[1];
+                Button chip = createCompactButton(label, 0xFF2A362D);
+                chip.setTextSize(11f);
+                chip.setOnClickListener(v -> {
+                    sounds.playClick();
+                    jumpTarget[0] = target;
+                    if (tvContent.getLayout() != null) {
+                        scrollToTarget[0].run();
+                    } else {
+                        tvContent.post(scrollToTarget[0]);
+                    }
+                });
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 54);
+                clp.setMargins(0, 0, 6, 0);
+                chipContainer.addView(chip, clp);
+            }
+        };
+
+        final java.lang.Runnable updateTabDisplay = () -> {
+            updateCompactButtonColor(btnTabManual, currentTab[0] == 0 ? 0xFF2E7D32 : 0xFF263238);
+            btnTabManual.setTextColor(currentTab[0] == 0 ? 0xFFFFD54F : 0xFFCFD8DC);
+
+            updateCompactButtonColor(btnTabStrategy, currentTab[0] == 1 ? 0xFF2E7D32 : 0xFF263238);
+            btnTabStrategy.setTextColor(currentTab[0] == 1 ? 0xFFFFD54F : 0xFFCFD8DC);
+
+            updateCompactButtonColor(btnTabCampaign, currentTab[0] == 2 ? 0xFF2E7D32 : 0xFF263238);
+            btnTabCampaign.setTextColor(currentTab[0] == 2 ? 0xFFFFD54F : 0xFFCFD8DC);
+
+            if (currentTab[0] == 0) {
+                tvContent.setText(PgManualManager.getInstructionManualText());
+            } else if (currentTab[0] == 1) {
+                tvContent.setText(PgManualManager.getStrategyGuideText(MainActivity.this));
+            } else {
+                tvContent.setText(PgManualManager.getCampaignGuideText(MainActivity.this));
+            }
+
+            populateChips.run();
+            contentScroll.scrollTo(0, 0);
+        };
+
+        btnTabManual.setOnClickListener(v -> {
+            sounds.playClick();
+            currentTab[0] = 0;
+            etSearch.setText("");
+            updateTabDisplay.run();
+        });
+
+        btnTabStrategy.setOnClickListener(v -> {
+            sounds.playClick();
+            currentTab[0] = 1;
+            etSearch.setText("");
+            updateTabDisplay.run();
+        });
+
+        btnTabCampaign.setOnClickListener(v -> {
+            sounds.playClick();
+            currentTab[0] = 2;
+            etSearch.setText("");
+            updateTabDisplay.run();
+        });
+
+        btnClearSearch.setOnClickListener(v -> {
+            sounds.playClick();
+            etSearch.setText("");
+        });
+
+        etSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                String q = (s != null) ? s.toString().trim() : "";
+                if (q.length() < 2) {
+                    searchScroll.setVisibility(View.GONE);
+                    contentScroll.setVisibility(View.VISIBLE);
+                    return;
+                }
+                searchScroll.setVisibility(View.VISIBLE);
+                contentScroll.setVisibility(View.GONE);
+                searchList.removeAllViews();
+
+                List<PgManualManager.SearchResult> res = PgManualManager.searchDocumentation(MainActivity.this, q);
+                if (res.isEmpty()) {
+                    TextView tvNone = new TextView(MainActivity.this);
+                    tvNone.setText("No occurrences found for \"" + q + "\".\nTry searching for terms like: Overrun, Rugged, Pioniere, Bridge, Air, Supply, Replacements, Weather, Sealion, Moscow...");
+                    tvNone.setTextColor(0xFF90A4AE);
+                    tvNone.setTextSize(13.5f);
+                    tvNone.setPadding(20, 30, 20, 30);
+                    tvNone.setGravity(Gravity.CENTER);
+                    searchList.addView(tvNone);
+                    return;
+                }
+
+                TextView tvHeader = new TextView(MainActivity.this);
+                tvHeader.setText(String.format(Locale.ROOT, "Found %d matching sections for \"%s\":", res.size(), q));
+                tvHeader.setTextColor(0xFFFFD54F);
+                tvHeader.setTextSize(13f);
+                tvHeader.setTypeface(Typeface.DEFAULT_BOLD);
+                tvHeader.setPadding(10, 8, 10, 8);
+                searchList.addView(tvHeader);
+
+                for (PgManualManager.SearchResult r : res) {
+                    LinearLayout card = new LinearLayout(MainActivity.this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(16, 12, 16, 12);
+                    GradientDrawable cbg = new GradientDrawable();
+                    cbg.setColor(0xFF1E2620);
+                    cbg.setCornerRadius(8f);
+                    cbg.setStroke(1, 0xFF3E4F42);
+                    card.setBackground(cbg);
+
+                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    clp.setMargins(0, 4, 0, 4);
+
+                    LinearLayout tagRow = new LinearLayout(MainActivity.this);
+                    tagRow.setOrientation(LinearLayout.HORIZONTAL);
+                    tagRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                    TextView badge = new TextView(MainActivity.this);
+                    badge.setText(r.tabName.toUpperCase(Locale.ROOT));
+                    badge.setTextSize(10f);
+                    badge.setTypeface(Typeface.DEFAULT_BOLD);
+                    badge.setPadding(8, 3, 8, 3);
+                    GradientDrawable bgb = new GradientDrawable();
+                    int badgeColor = (r.tabIndex == 0) ? 0xFF2E7D32 : (r.tabIndex == 1 ? 0xFFD84315 : 0xFF00838F);
+                    bgb.setColor(badgeColor);
+                    bgb.setCornerRadius(4f);
+                    badge.setBackground(bgb);
+                    badge.setTextColor(0xFFFFFFFF);
+                    tagRow.addView(badge);
+
+                    TextView tvSec = new TextView(MainActivity.this);
+                    tvSec.setText("  " + r.sectionHeader);
+                    tvSec.setTextColor(0xFFFFD54F);
+                    tvSec.setTextSize(12.5f);
+                    tvSec.setTypeface(Typeface.DEFAULT_BOLD);
+                    tagRow.addView(tvSec);
+                    card.addView(tagRow);
+
+                    TextView tvSnip = new TextView(MainActivity.this);
+                    tvSnip.setText(r.snippet);
+                    tvSnip.setTextColor(0xFFCFD8DC);
+                    tvSnip.setTextSize(12f);
+                    tvSnip.setPadding(0, 6, 0, 0);
+                    card.addView(tvSnip);
+
+                    card.setOnClickListener(v -> {
+                        sounds.playClick();
+                        etSearch.setText("");
+                        currentTab[0] = r.tabIndex;
+                        updateTabDisplay.run();
+                        jumpTarget[0] = r.sectionHeader;
+                        tvContent.post(scrollToTarget[0]);
+                    });
+
+                    searchList.addView(card, clp);
+                }
+            }
+        });
+
+        updateTabDisplay.run();
+        dialog.setContentView(root);
+        dialog.show();
     }
 
     private void showInGameMenuDialog() {
@@ -4238,8 +4606,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             actions.add(() -> showActiveUnitActionsModal(selUnit));
         }
 
-        labels.add("Panzer General Instruction Manual & Tactical Rules");
-        actions.add(this::showFieldManualDialog);
+        labels.add("📖 Official Instruction Manual & Tactical Rules");
+        actions.add(() -> showFieldManualDialog(0));
+
+        labels.add("🎖️ Official SSI Strategy Guide (Tactics & Combined Arms)");
+        actions.add(() -> showFieldManualDialog(1));
+
+        labels.add("🗺️ Campaign Operations Guide & Scenario Notes");
+        actions.add(() -> showFieldManualDialog(2));
 
         labels.add("Game Options & Preferences (Supply, Weather, Fog of War...)");
         actions.add(this::showPreferencesDialog);
