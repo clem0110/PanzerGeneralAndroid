@@ -659,9 +659,14 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
         btnAirToggle = createCompactButton("AIR/GND", 0xFF37474F);
         btnAirToggle.setOnClickListener(v -> {
-            mapView.airModePreferred = !mapView.airModePreferred;
-            btnAirToggle.setText(mapView.airModePreferred ? "AIR TOP" : "GND TOP");
+            boolean currentAirTop = mapView.isShowingAirOnTop();
+            mapView.airModePreferred = !currentAirTop;
+            if (currentAirTop && mapView.selectedUnit != null && engine.isUnitOnAirLayer(mapView.selectedUnit)) {
+                mapView.clearSelection();
+            }
+            btnAirToggle.setText(mapView.isShowingAirOnTop() ? "AIR TOP" : "GND TOP");
             sounds.playClick();
+            refreshHud();
             mapView.invalidate();
         });
         bottomBar.addView(btnAirToggle);
@@ -1083,6 +1088,10 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         }
 
         updateUnitInspector(mapView.selectedCol, mapView.selectedRow, mapView.selectedUnit);
+
+        if (btnAirToggle != null && mapView != null) {
+            btnAirToggle.setText(mapView.isShowingAirOnTop() ? "AIR TOP" : "GND TOP");
+        }
     }
 
     private void setUnitActionButtonAvailable(Button btn, boolean available) {

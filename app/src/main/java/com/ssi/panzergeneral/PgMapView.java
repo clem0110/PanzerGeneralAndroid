@@ -305,6 +305,13 @@ public class PgMapView extends View {
         invalidate();
     }
 
+    public boolean isShowingAirOnTop() {
+        if (selectedUnit != null && engine != null && engine.isUnitOnAirLayer(selectedUnit)) {
+            return true;
+        }
+        return airModePreferred;
+    }
+
     public void selectUnit(PgDatabase.ActiveUnit u) {
         if (u == null) {
             clearSelection();
@@ -316,6 +323,7 @@ public class PgMapView extends View {
         if (engine != null) {
             engine.lastSelectedCol = u.col;
             engine.lastSelectedRow = u.row;
+            airModePreferred = engine.isUnitOnAirLayer(u);
         }
         if (engine.isPlayerUnit(u) && engine.isPlayerTurn && !engine.isDeploymentPhase) {
             reachableHexes = engine.getReachableHexes(u);
@@ -645,7 +653,7 @@ public class PgMapView extends View {
             // If hex has another friendly unit on opposite layer, toggle selection between them
             if (selectedUnit != null) {
                 PgDatabase.ActiveUnit otherLayer = engine.getUnitAt(col, row, !engine.isUnitOnAirLayer(selectedUnit));
-                if (otherLayer != null && otherLayer.isAxis) {
+                if (otherLayer != null && engine.isPlayerUnit(otherLayer)) {
                     sounds.playSelect();
                     selectUnit(otherLayer);
                     return;
@@ -658,7 +666,7 @@ public class PgMapView extends View {
         }
 
         // 4. Otherwise select unit or inspect hex at (col, row)
-        PgDatabase.ActiveUnit tappedUnit = engine.getTopUnitAt(col, row, airModePreferred);
+        PgDatabase.ActiveUnit tappedUnit = engine.getTopUnitAt(col, row, isShowingAirOnTop());
         if (tappedUnit != null) {
             PgDatabase.ActiveUnit alt = engine.getUnitAt(col, row, !engine.isUnitOnAirLayer(tappedUnit));
             if (alt != null) {
@@ -914,9 +922,22 @@ public class PgMapView extends View {
                 }
 
                 if (groundUnit != null && airUnit != null) {
-                    boolean groundSelected = (selectedUnit == groundUnit);
-                    boolean airSelected = (selectedUnit == airUnit);
-                    if (airSelected || (airModePreferred && !groundSelected)) {
+                    boolean isAirUnitSelected = (selectedUnit != null && engine != null && engine.isUnitOnAirLayer(selectedUnit));
+                    boolean groundSelectedInHex = (selectedUnit == groundUnit);
+                    boolean airSelectedInHex = (selectedUnit == airUnit);
+
+                    boolean showAirOnTop;
+                    if (isAirUnitSelected) {
+                        showAirOnTop = true;
+                    } else if (groundSelectedInHex) {
+                        showAirOnTop = false;
+                    } else if (airSelectedInHex) {
+                        showAirOnTop = true;
+                    } else {
+                        showAirOnTop = airModePreferred;
+                    }
+
+                    if (showAirOnTop) {
                         drawSingleUnit(canvas, groundUnit, x - 3f, y + 3f, true);
                         drawSingleUnit(canvas, airUnit, x, y, false);
                     } else {
