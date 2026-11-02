@@ -227,29 +227,21 @@ public class PgCampaignManager {
         engine.turn++;
         updateWeather();
 
-        // Strategy Guide Chapter 6: Continuing Control of Hexes
-        // Offensive player: +4 per objective, +1 per normal city/port/airfield
-        // Defending player: +8 per objective, +4 per normal city/port/airfield
+        // Strategy Guide Chapter 6 & Manual Chapter 10: Continuing Control of Strategic Objectives
+        // Objective hexes award continuing prestige each turn they remain controlled:
+        // Offensive side: +4 per objective held
+        // Defending side: +8 per objective held
+        // (Ordinary non-objective cities do not award continuing prestige each turn; they grant only initial capture prestige)
         if (engine.scenario != null) {
             boolean axisDefending = engine.scenario.isDefensiveScenario;
             for (int c = 0; c < engine.scenario.cols; c++) {
                 for (int r = 0; r < engine.scenario.rows; r++) {
                     PgDatabase.HexCell cell = engine.scenario.grid[c][r];
-                    boolean isCityPortAirfield = (cell.terrainType == 8 || cell.terrainType == 6 || cell.isPort());
-                    if (isCityPortAirfield || cell.isObjective) {
-                        boolean isAxisOwner = db.isAxisNation(cell.ownerNation, engine.scenario);
-                        if (isAxisOwner) {
-                            if (cell.isObjective) {
-                                engine.axisPrestige += axisDefending ? 8 : 4;
-                            } else {
-                                engine.axisPrestige += axisDefending ? 4 : 1;
-                            }
-                        } else if (cell.ownerNation > 0) {
-                            if (cell.isObjective) {
-                                engine.alliedPrestige += axisDefending ? 4 : 8;
-                            } else {
-                                engine.alliedPrestige += axisDefending ? 1 : 4;
-                            }
+                    if (cell.isObjective && cell.ownerNation > 0) {
+                        if (db.isAxisNation(cell.ownerNation, engine.scenario)) {
+                            engine.axisPrestige += axisDefending ? 8 : 4;
+                        } else if (db.isAlliedNation(cell.ownerNation, engine.scenario)) {
+                            engine.alliedPrestige += axisDefending ? 4 : 8;
                         }
                     }
                 }

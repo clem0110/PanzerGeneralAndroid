@@ -181,13 +181,12 @@ public class PgAiController {
         PgDatabase.UnitDef def = db.equipment.get(u.unitDefId);
         int needed = 10 - u.strength;
         int costPerPoint = Math.max(5, def.cost / 15);
-        int cost = needed * costPerPoint;
-        if (engine.getAiPrestige() < cost) {
-            cost = engine.getAiPrestige();
-            needed = Math.max(1, cost / costPerPoint);
-        }
-        engine.addAiPrestige(-cost);
-        u.strength += needed;
+        int maxAffordable = engine.getAiPrestige() / costPerPoint;
+        if (maxAffordable <= 0) return false;
+        int pointsToTake = Math.min(needed, maxAffordable);
+        int totalCost = pointsToTake * costPerPoint;
+        engine.addAiPrestige(-totalCost);
+        u.strength += pointsToTake;
         u.moved = true;
         u.attacked = true;
         u.movePointsUsed = engine.getMaxMovementPoints(u);
@@ -742,9 +741,10 @@ public class PgAiController {
 
         // =========================================================================
         // PHASE 9: Smart AI Reinforcements / Prestige Spending
-        // Allow multiple purchases per turn as long as AI has prestige, placing units where most effective
+        // In Campaign mode, AI reserves its prestige strictly for replacements (authentic SSI rules).
+        // In Scenario mode, AI may requisition at most 1 unit per turn if prestige >= 100.
         // =========================================================================
-        if (engine.scenario != null && engine.getAiPrestige() >= 50) {
+        if (engine.scenario != null && !engine.isCampaignMode && engine.getAiPrestige() >= 100) {
             List<PgDatabase.UnitDef> candidateDefs = new ArrayList<>();
             Set<Integer> seenDefIds = new HashSet<>();
             for (PgDatabase.ActiveUnit initU : engine.scenario.initialUnits) {
@@ -787,7 +787,7 @@ public class PgAiController {
                 }
             }
 
-            int maxPurchasesThisTurn = 15;
+            int maxPurchasesThisTurn = 1;
             int purchasesDone = 0;
 
             while (purchasesDone < maxPurchasesThisTurn) {

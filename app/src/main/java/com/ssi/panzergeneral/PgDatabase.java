@@ -757,6 +757,19 @@ public class PgDatabase {
         return sd;
     }
 
+
+    public boolean isAlliedNation(int nation, ScenarioData sd) {
+        if (nation <= 0) return false;
+        if (isAxisNation(nation, sd)) return false;
+        if (sd != null && sd.alliedNations != null) {
+            for (int n : sd.alliedNations) {
+                if (n > 0 && n == nation) return true;
+            }
+        }
+        // Standard Allied nations: 2=Belgium, 7=France, 9=Greece, 10=USA, 14=Netherlands, 15=Norway, 16=Poland, 20=USSR, 23=Great Britain, 24=Yugoslavia
+        return nation == 2 || nation == 7 || nation == 9 || nation == 10 || nation == 14 || nation == 15 || nation == 16 || nation == 20 || nation == 23 || nation == 24;
+    }
+
     public boolean isAxisNation(int nation, ScenarioData sd) {
         if (nation <= 0) return false;
         // Authentic Panzer General Axis nation IDs:
