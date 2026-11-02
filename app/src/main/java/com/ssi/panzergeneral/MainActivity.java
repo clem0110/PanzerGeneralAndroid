@@ -61,6 +61,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     private Button btnNextUnit;
     private Button btnEndTurn;
     private volatile boolean isAiTurnRunning = false;
+    private final PgTurnLossTracker turnLossTracker = new PgTurnLossTracker();
+    private PgTurnLossTracker.TurnSummary lastTurnLossSummary = null;
     private static final int REQUEST_SAVE_TO_DRIVE = 1001;
     private static final int REQUEST_LOAD_FROM_DRIVE = 1002;
     private static final int REQUEST_IMPORT_TO_SLOT = 1003;
@@ -1002,6 +1004,7 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         if (titleOverlay != null) {
             titleOverlay.setVisibility(View.GONE);
         }
+        lastTurnLossSummary = null;
         mapView.purchasePlacementMode = false;
         mapView.strategicMapOverlay = false;
         mapView.clearSelection();
@@ -2424,6 +2427,509 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         dialog.show();
     }
 
+    private View createLossKpiPill(String title, String value, int valColor, int bgColor) {
+        LinearLayout pill = new LinearLayout(this);
+        pill.setOrientation(LinearLayout.VERTICAL);
+        pill.setGravity(Gravity.CENTER);
+        pill.setPadding(10, 8, 10, 8);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(bgColor);
+        gd.setCornerRadius(8f);
+        gd.setStroke(1, 0xFF455A64);
+        pill.setBackground(gd);
+
+        TextView tvVal = new TextView(this);
+        tvVal.setText(value);
+        tvVal.setTextColor(valColor);
+        tvVal.setTextSize(16f);
+        tvVal.setTypeface(Typeface.DEFAULT_BOLD);
+        tvVal.setGravity(Gravity.CENTER);
+        pill.addView(tvVal);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(title);
+        tvTitle.setTextColor(0xFFCFD8DC);
+        tvTitle.setTextSize(10.5f);
+        tvTitle.setGravity(Gravity.CENTER);
+        pill.addView(tvTitle);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        lp.setMargins(4, 0, 4, 0);
+        pill.setLayoutParams(lp);
+        return pill;
+    }
+
+    private View createSectionHeaderView(String title, int color) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(12, 12, 12, 6);
+
+        View stripe = new View(this);
+        stripe.setBackgroundColor(color);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(6, 26);
+        sLp.setMargins(0, 0, 10, 0);
+        row.addView(stripe, sLp);
+
+        TextView tv = new TextView(this);
+        tv.setText(title);
+        tv.setTextColor(color);
+        tv.setTextSize(13f);
+        tv.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        row.addView(tv);
+
+        return row;
+    }
+
+    private View createEmptySectionBanner(String text, int textColor) {
+        LinearLayout banner = new LinearLayout(this);
+        banner.setOrientation(LinearLayout.HORIZONTAL);
+        banner.setGravity(Gravity.CENTER_VERTICAL);
+        banner.setPadding(16, 10, 16, 10);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(0xFF1B221E);
+        gd.setCornerRadius(6f);
+        banner.setBackground(gd);
+
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(textColor);
+        tv.setTextSize(11.5f);
+        tv.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.ITALIC));
+        banner.addView(tv);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(6, 2, 6, 6);
+        banner.setLayoutParams(lp);
+        return banner;
+    }
+
+    private View createBadgePill(String text, int textColor, int bgColor) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(textColor);
+        tv.setTextSize(9.5f);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setPadding(8, 2, 8, 2);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(bgColor);
+        gd.setCornerRadius(6f);
+        tv.setBackground(gd);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(4, 0, 0, 0);
+        tv.setLayoutParams(lp);
+        return tv;
+    }
+
+    private View createLossRecordCard(final PgTurnLossTracker.UnitLossRecord r, final Dialog dialog, boolean isFriendly, boolean isDamaged) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(12, 10, 12, 10);
+
+        GradientDrawable cardBg = new GradientDrawable();
+        int strokeColor;
+        if (isFriendly) {
+            if (isDamaged) {
+                cardBg.setColor(0xFF22261E);
+                strokeColor = 0xFFF57C00;
+            } else {
+                cardBg.setColor(0xFF2A1C1C);
+                strokeColor = 0xFFD32F2F;
+            }
+        } else {
+            cardBg.setColor(0xFF1B231F);
+            strokeColor = 0xFF388E3C;
+        }
+        cardBg.setCornerRadius(8f);
+        cardBg.setStroke(2, strokeColor);
+        card.setBackground(cardBg);
+
+        // Unit Sprite Icon
+        ImageView ivIcon = new ImageView(this);
+        Bitmap iconBmp = assets != null ? assets.getSprite("TACICONS.SHP", r.iconId) : null;
+        if (iconBmp != null) {
+            ivIcon.setImageBitmap(Bitmap.createScaledBitmap(iconBmp, 56, 44, false));
+        }
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(56, 44);
+        iconLp.setMargins(0, 0, 12, 0);
+        card.addView(ivIcon, iconLp);
+
+        // Information Column
+        LinearLayout infoCol = new LinearLayout(this);
+        infoCol.setOrientation(LinearLayout.VERTICAL);
+
+        // Row 1: Name, Class, Core badge, Stars
+        LinearLayout nameRow = new LinearLayout(this);
+        nameRow.setOrientation(LinearLayout.HORIZONTAL);
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tvName = new TextView(this);
+        tvName.setText(r.unitName != null ? r.unitName : "Unit");
+        tvName.setTextColor(0xFFFFFFFF);
+        tvName.setTextSize(13f);
+        tvName.setTypeface(Typeface.DEFAULT_BOLD);
+        nameRow.addView(tvName);
+
+        String className = (r.unitClass >= 0 && r.unitClass < PgDatabase.CLASS_NAMES.length)
+                ? PgDatabase.CLASS_NAMES[r.unitClass] : "";
+        if (!className.isEmpty()) {
+            TextView tvClass = new TextView(this);
+            tvClass.setText("  •  " + className);
+            tvClass.setTextColor(0xFFB0BEC5);
+            tvClass.setTextSize(11f);
+            nameRow.addView(tvClass);
+        }
+
+        if (r.isCore) {
+            nameRow.addView(createBadgePill("CORE", 0xFFFFD54F, 0x33F57F17));
+        } else if (isFriendly) {
+            nameRow.addView(createBadgePill("AUX", 0xFF90CAF9, 0x221565C0));
+        }
+
+        if (r.stars > 0) {
+            StringBuilder sb = new StringBuilder();
+            for (int s = 0; s < r.stars; s++) sb.append("★");
+            TextView tvStars = new TextView(this);
+            tvStars.setText(" " + sb.toString());
+            tvStars.setTextColor(0xFFFFD54F);
+            tvStars.setTextSize(11f);
+            nameRow.addView(tvStars);
+        }
+
+        infoCol.addView(nameRow);
+
+        // Row 2: Status & Strength metrics
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        statusRow.setPadding(0, 3, 0, 2);
+
+        TextView tvStatus = new TextView(this);
+        if (isFriendly) {
+            if (isDamaged) {
+                tvStatus.setText(String.format(Locale.ROOT, "Strength: %d / %d  (-%d lost)",
+                        r.currentStrength, r.startStrength, r.strengthLost));
+                tvStatus.setTextColor(0xFFFFB74D);
+            } else {
+                if (r.surrendered) {
+                    tvStatus.setText(String.format(Locale.ROOT, "STATUS: SURRENDERED & DESTROYED (-%d str)", r.strengthLost));
+                } else if (r.fuelCrash) {
+                    tvStatus.setText(String.format(Locale.ROOT, "STATUS: FUEL EXHAUSTION CRASH (-%d str)", r.strengthLost));
+                } else {
+                    tvStatus.setText(String.format(Locale.ROOT, "STATUS: DESTROYED (-%d str)", r.strengthLost));
+                }
+                tvStatus.setTextColor(0xFFFF5252);
+            }
+        } else {
+            if (isDamaged) {
+                tvStatus.setText(String.format(Locale.ROOT, "STATUS: DAMAGED  (Remaining: %d, -%d str)",
+                        r.currentStrength, r.strengthLost));
+                tvStatus.setTextColor(0xFFA5D6A7);
+            } else {
+                tvStatus.setText(String.format(Locale.ROOT, "STATUS: DESTROYED (-%d str)", r.strengthLost));
+                tvStatus.setTextColor(0xFF69F0AE);
+            }
+        }
+        tvStatus.setTextSize(11.5f);
+        tvStatus.setTypeface(Typeface.DEFAULT_BOLD);
+        statusRow.addView(tvStatus);
+
+        if (r.retreated) {
+            statusRow.addView(createBadgePill("RETREATED", 0xFFFFD54F, 0x33F57F17));
+        }
+        if (r.ruggedDefenseTriggered) {
+            statusRow.addView(createBadgePill("RUGGED DEFENSE", 0xFF4DD0E1, 0x3300838F));
+        }
+
+        TextView tvLoc = new TextView(this);
+        tvLoc.setText(String.format(Locale.ROOT, "   •   Hex (%d,%d)", r.col, r.row));
+        tvLoc.setTextColor(0xFF90A4AE);
+        tvLoc.setTextSize(11f);
+        statusRow.addView(tvLoc);
+
+        infoCol.addView(statusRow);
+
+        // Row 3: Attack causes or notes
+        if (!r.attackCauses.isEmpty()) {
+            TextView tvCauses = new TextView(this);
+            StringBuilder cb = new StringBuilder();
+            for (int i = 0; i < r.attackCauses.size(); i++) {
+                if (i > 0) cb.append("  |  ");
+                cb.append(r.attackCauses.get(i));
+            }
+            tvCauses.setText(cb.toString());
+            tvCauses.setTextColor(0xFFB0BEC5);
+            tvCauses.setTextSize(10.5f);
+            infoCol.addView(tvCauses);
+        }
+
+        card.addView(infoCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        // If friendly and alive (damaged), show an interactive "LOCATE" button and make the card clickable
+        if (isFriendly && isDamaged) {
+            Button btnLocate = createCompactButton("📍 LOCATE", 0xFFC5A059);
+            btnLocate.setTextColor(0xFF1B221D);
+            btnLocate.setTextSize(10f);
+            View.OnClickListener jumpAction = v -> {
+                sounds.playSelect();
+                dialog.dismiss();
+                PgDatabase.ActiveUnit targetUnit = null;
+                for (PgDatabase.ActiveUnit u : engine.units) {
+                    if (u != null && u.instanceId == r.instanceId) {
+                        targetUnit = u;
+                        break;
+                    }
+                }
+                if (targetUnit != null && targetUnit.col >= 0 && targetUnit.row >= 0) {
+                    final PgDatabase.ActiveUnit sel = targetUnit;
+                    mapView.centerOnHex(sel.col, sel.row);
+                    mapView.selectUnit(sel);
+                    refreshHud();
+                    mapView.invalidate();
+                    Toast.makeText(MainActivity.this, "Focused on " + r.unitName + " at (" + sel.col + "," + sel.row + ")", Toast.LENGTH_SHORT).show();
+                }
+            };
+            btnLocate.setOnClickListener(jumpAction);
+            card.setOnClickListener(jumpAction);
+            LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 56);
+            bLp.setMargins(10, 0, 0, 0);
+            card.addView(btnLocate, bLp);
+        }
+
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.setMargins(6, 3, 6, 3);
+        card.setLayoutParams(cardLp);
+        return card;
+    }
+
+    private View createCombatLogCard(PgTurnLossTracker.CombatLogEntry entry) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(12, 8, 12, 8);
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(0xFF1D221E);
+        gd.setCornerRadius(8f);
+        gd.setStroke(1, 0xFF37474F);
+        card.setBackground(gd);
+
+        // Header: Attacker vs Defender
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tvVs = new TextView(this);
+        String atkColorTag = entry.isAttackerPlayer ? "#81C784" : "#E57373";
+        String defColorTag = entry.isAttackerPlayer ? "#E57373" : "#81C784";
+        tvVs.setText(android.text.Html.fromHtml(String.format(Locale.ROOT,
+                "<font color='%s'><b>%s</b></font> <font color='#B0BEC5'>attacked</font> <font color='%s'><b>%s</b></font> <font color='#90A4AE'>at (%d,%d)</font>",
+                atkColorTag, entry.attackerName, defColorTag, entry.defenderName, entry.targetCol, entry.targetRow)));
+        tvVs.setTextSize(12f);
+        topRow.addView(tvVs, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(topRow);
+
+        // Result row
+        LinearLayout resRow = new LinearLayout(this);
+        resRow.setOrientation(LinearLayout.HORIZONTAL);
+        resRow.setGravity(Gravity.CENTER_VERTICAL);
+        resRow.setPadding(0, 4, 0, 0);
+
+        TextView tvLosses = new TextView(this);
+        tvLosses.setText(String.format(Locale.ROOT, "Casualties: Attacker -%d str   •   Defender -%d str",
+                entry.attackerLosses, entry.defenderLosses));
+        tvLosses.setTextColor(0xFFCFD8DC);
+        tvLosses.setTextSize(11f);
+        resRow.addView(tvLosses, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (entry.defenderDestroyed) {
+            resRow.addView(createBadgePill("DESTROYED", 0xFFFF5252, 0x33D32F2F));
+        } else if (entry.defenderSurrendered) {
+            resRow.addView(createBadgePill("SURRENDERED", 0xFFFF7043, 0x33E64A19));
+        } else if (entry.defenderRetreated) {
+            resRow.addView(createBadgePill("RETREATED", 0xFFFFD54F, 0x33F57F17));
+        }
+        if (entry.attackerDestroyed) {
+            resRow.addView(createBadgePill("ATK DESTROYED", 0xFFFF5252, 0x33D32F2F));
+        }
+        if (entry.ruggedDefense) {
+            resRow.addView(createBadgePill("RUGGED DEFENSE", 0xFF4DD0E1, 0x3300838F));
+        }
+        if (entry.defensiveSupportFired) {
+            String supText = entry.supportUnitName != null ? ("ARTILLERY: " + entry.supportUnitName) : "DEFENSIVE SUPPORT";
+            resRow.addView(createBadgePill(supText, 0xFF81C784, 0x332E7D32));
+        }
+
+        card.addView(resRow);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(6, 3, 6, 3);
+        card.setLayoutParams(lp);
+        return card;
+    }
+
+    public void showTurnLossSummaryDialog(final PgTurnLossTracker.TurnSummary summary) {
+        if (summary == null || isFinishing() || isDestroyed()) return;
+
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF141915);
+        root.setPadding(20, 14, 20, 14);
+
+        // Header Bar
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(16, 10, 16, 10);
+        GradientDrawable hdrBg = new GradientDrawable();
+        hdrBg.setColor(0xFF1F2721);
+        hdrBg.setCornerRadius(10f);
+        hdrBg.setStroke(2, 0xFFC5A059);
+        headerRow.setBackground(hdrBg);
+
+        ImageView ivFlag = new ImageView(this);
+        Bitmap flagBmp = assets != null ? assets.getTrimmedSprite("FLAGS.SHP", engine != null ? engine.getPlayerFlagSpriteIndex() : 0) : null;
+        if (flagBmp != null) {
+            ivFlag.setImageBitmap(Bitmap.createScaledBitmap(flagBmp, 48, 36, false));
+        }
+        LinearLayout.LayoutParams flagLp = new LinearLayout.LayoutParams(52, 40);
+        flagLp.setMargins(0, 0, 14, 0);
+        headerRow.addView(ivFlag, flagLp);
+
+        LinearLayout titleStack = new LinearLayout(this);
+        titleStack.setOrientation(LinearLayout.VERTICAL);
+        TextView tvHeaderTitle = new TextView(this);
+        tvHeaderTitle.setText(String.format(Locale.ROOT, "TURN %d AFTER-ACTION COMBAT & LOSS SUMMARY", summary.turnNumber));
+        tvHeaderTitle.setTextColor(0xFFFFD54F);
+        tvHeaderTitle.setTextSize(15f);
+        tvHeaderTitle.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+        titleStack.addView(tvHeaderTitle);
+
+        TextView tvSubHeader = new TextView(this);
+        tvSubHeader.setText(String.format(Locale.ROOT,
+                "Enemy Turn Casualty Report   •   %s Forces   •   Tap any damaged unit to focus & select on map",
+                summary.playerSideName));
+        tvSubHeader.setTextColor(0xFFB0BEC5);
+        tvSubHeader.setTextSize(11.5f);
+        titleStack.addView(tvSubHeader);
+        headerRow.addView(titleStack, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        root.addView(headerRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Quick KPI Metric Pills (Total Player Units Lost, Total Player Str Lost, Total Enemy Units Lost, Total Enemy Str Lost)
+        LinearLayout kpiBar = new LinearLayout(this);
+        kpiBar.setOrientation(LinearLayout.HORIZONTAL);
+        kpiBar.setPadding(0, 10, 0, 8);
+
+        View pLossPill = createLossKpiPill("Friendly Destroyed", String.valueOf(summary.totalPlayerUnitsLost),
+                summary.totalPlayerUnitsLost > 0 ? 0xFFFF5252 : 0xFF81C784,
+                summary.totalPlayerUnitsLost > 0 ? 0x33D32F2F : 0x22388E3C);
+        kpiBar.addView(pLossPill);
+
+        View pStrLossPill = createLossKpiPill("Friendly Str Lost", "-" + summary.totalPlayerStrengthLost,
+                summary.totalPlayerStrengthLost > 0 ? 0xFFFF7043 : 0xFFB0BEC5,
+                summary.totalPlayerStrengthLost > 0 ? 0x33E64A19 : 0x2237474F);
+        kpiBar.addView(pStrLossPill);
+
+        View eLossPill = createLossKpiPill("Enemy Destroyed", String.valueOf(summary.totalEnemyUnitsLost),
+                summary.totalEnemyUnitsLost > 0 ? 0xFF69F0AE : 0xFFB0BEC5,
+                summary.totalEnemyUnitsLost > 0 ? 0x332E7D32 : 0x2237474F);
+        kpiBar.addView(eLossPill);
+
+        View eStrLossPill = createLossKpiPill("Enemy Str Lost", "-" + summary.totalEnemyStrengthLost,
+                summary.totalEnemyStrengthLost > 0 ? 0xFFFFD54F : 0xFFB0BEC5,
+                summary.totalEnemyStrengthLost > 0 ? 0x33F57F17 : 0x2237474F);
+        kpiBar.addView(eStrLossPill);
+
+        root.addView(kpiBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Scrollable sections container
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+        LinearLayout contentLayout = new LinearLayout(this);
+        contentLayout.setOrientation(LinearLayout.VERTICAL);
+        contentLayout.setPadding(0, 4, 0, 8);
+
+        // Section 1: Friendly Units Destroyed
+        contentLayout.addView(createSectionHeaderView("💥 FRIENDLY UNITS DESTROYED (" + summary.playerDestroyed.size() + ")", 0xFFFF5252));
+        if (summary.playerDestroyed.isEmpty()) {
+            contentLayout.addView(createEmptySectionBanner("✓ No friendly units were destroyed during the enemy turn. Perimeter held!", 0xFF81C784));
+        } else {
+            for (PgTurnLossTracker.UnitLossRecord r : summary.playerDestroyed) {
+                contentLayout.addView(createLossRecordCard(r, dialog, true, false));
+            }
+        }
+
+        // Section 2: Friendly Damaged Units
+        contentLayout.addView(createSectionHeaderView("⚠️ FRIENDLY UNITS DAMAGED / ATTACKED (" + summary.playerDamaged.size() + ")", 0xFFFFB74D));
+        if (summary.playerDamaged.isEmpty()) {
+            contentLayout.addView(createEmptySectionBanner("✓ No friendly units sustained casualties this turn.", 0xFF81C784));
+        } else {
+            for (PgTurnLossTracker.UnitLossRecord r : summary.playerDamaged) {
+                contentLayout.addView(createLossRecordCard(r, dialog, true, true));
+            }
+        }
+
+        // Section 3: Enemy Casualties
+        int totalEnemyCasualtyCards = summary.enemyDestroyed.size() + summary.enemyDamaged.size();
+        contentLayout.addView(createSectionHeaderView("🎯 ENEMY CASUALTIES INFLICTED (" + totalEnemyCasualtyCards + ")", 0xFF69F0AE));
+        if (totalEnemyCasualtyCards == 0) {
+            contentLayout.addView(createEmptySectionBanner("No enemy casualties inflicted during defensive counter-fire.", 0xFF90A4AE));
+        } else {
+            for (PgTurnLossTracker.UnitLossRecord r : summary.enemyDestroyed) {
+                contentLayout.addView(createLossRecordCard(r, dialog, false, false));
+            }
+            for (PgTurnLossTracker.UnitLossRecord r : summary.enemyDamaged) {
+                contentLayout.addView(createLossRecordCard(r, dialog, false, true));
+            }
+        }
+
+        // Section 4: Combat Engagement Log
+        contentLayout.addView(createSectionHeaderView("📜 COMBAT ENGAGEMENT LOG (" + summary.combatLog.size() + ")", 0xFF90CAF9));
+        if (summary.combatLog.isEmpty()) {
+            contentLayout.addView(createEmptySectionBanner("No combat engagements took place during the enemy turn.", 0xFF90A4AE));
+        } else {
+            for (PgTurnLossTracker.CombatLogEntry entry : summary.combatLog) {
+                contentLayout.addView(createCombatLogCard(entry));
+            }
+        }
+
+        scrollView.addView(contentLayout, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(scrollView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+
+        // Footer Bar
+        LinearLayout footerRow = new LinearLayout(this);
+        footerRow.setOrientation(LinearLayout.HORIZONTAL);
+        footerRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        footerRow.setPadding(0, 10, 0, 0);
+
+        Button btnDismiss = createCompactButton("⚔️ RESUME BATTLE / PROCEED", 0xFFC5A059);
+        btnDismiss.setTextColor(0xFF1B221D);
+        btnDismiss.setTypeface(Typeface.DEFAULT_BOLD);
+        btnDismiss.setOnClickListener(v -> {
+            sounds.playSelect();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 64);
+        footerRow.addView(btnDismiss, btnLp);
+
+        root.addView(footerRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        dialog.setContentView(root);
+        dialog.show();
+    }
+
     private void performEndTurn() {
         if (isAiTurnRunning) return;
         if (mapView.pendingOverrunUnit != null) {
@@ -2433,11 +2939,13 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         mapView.clearSelection();
         isAiTurnRunning = true;
         setHudControlsEnabled(false);
-        tvTurnWeather.setText(String.format(Locale.ROOT, "\u2605 ALLIED TURN IN PROGRESS (Turn %d/%d) \u2605", engine.turn, engine.maxTurns));
+        String aiSideLabel = engine.playerIsAxis ? "ALLIED" : "AXIS";
+        tvTurnWeather.setText(String.format(Locale.ROOT, "\u2605 %s TURN IN PROGRESS (Turn %d/%d) \u2605", aiSideLabel, engine.turn, engine.maxTurns));
 
         new Thread(() -> {
             try {
                 Thread.sleep(300);
+                turnLossTracker.beginEnemyTurn(engine, db);
 
                 engine.endPlayerTurnAndRunAi(new PgGameEngine.AiTurnCallback() {
                     @Override
@@ -2464,10 +2972,12 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
 
                     @Override
                     public void onAiCombatExecuted(PgDatabase.ActiveUnit attacker, PgDatabase.ActiveUnit defender, PgGameEngine.CombatReport report) {
+                        turnLossTracker.recordCombat(report, attacker, defender, engine, db);
                         boolean tVis = report.targetCol >= 0 && report.targetRow >= 0 && engine.visibleHexes != null && report.targetCol < engine.scenario.cols && report.targetRow < engine.scenario.rows && engine.visibleHexes[report.targetCol][report.targetRow];
                         boolean involvesAxis = (defender != null && defender.isAxis) || (attacker != null && attacker.isAxis);
+                        boolean involvesPlayer = (defender != null && engine.isPlayerUnit(defender)) || (attacker != null && engine.isPlayerUnit(attacker));
 
-                        if (tVis || involvesAxis) {
+                        if (tVis || involvesAxis || involvesPlayer) {
                             if (!isFinishing() && !isDestroyed()) {
                                 if (report.supportReport != null) {
                                     // Step 1: Show defensive artillery fire on attacker first
@@ -2513,6 +3023,8 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
             } catch (Exception e) {
                 e.printStackTrace();
             } finally {
+                final PgTurnLossTracker.TurnSummary summary = turnLossTracker.endEnemyTurnAndCompile(engine, db, engine.campaignManager.lastTurnCrashedUnits);
+                lastTurnLossSummary = summary;
                 if (!isFinishing() && !isDestroyed()) {
                     runOnUiThread(() -> {
                         isAiTurnRunning = false;
@@ -2527,6 +3039,9 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
                             sounds.playSelect();
                             mapView.showYourTurnBanner(engine.turn, engine.maxTurns, engine.getWeatherLabel());
                             Toast.makeText(MainActivity.this, "\u2605 YOUR TURN! Turn " + engine.turn + " of " + engine.maxTurns + " \u2605", Toast.LENGTH_SHORT).show();
+                            if (summary != null && summary.hasActivity()) {
+                                showTurnLossSummaryDialog(summary);
+                            }
                         }
                     });
                 }
@@ -4588,6 +5103,11 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
         if (!engine.isDeploymentPhase) {
             labels.add("Scenario Unit Roster (Move & Attack Status)");
             actions.add(this::showUnitRosterDialog);
+        }
+
+        if (lastTurnLossSummary != null) {
+            labels.add("📊 Turn Combat & Unit Loss Summary");
+            actions.add(() -> showTurnLossSummaryDialog(lastTurnLossSummary));
         }
 
         if (mapView.selectedUnit != null) {

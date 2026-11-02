@@ -82,6 +82,7 @@ public class PgCampaignManager {
 
     private final PgGameEngine engine;
     private final PgDatabase db;
+    public final List<PgDatabase.ActiveUnit> lastTurnCrashedUnits = new ArrayList<>();
 
     public PgCampaignManager(PgGameEngine engine) {
         this.engine = engine;
@@ -297,7 +298,9 @@ public class PgCampaignManager {
                 }
             }
         }
+        lastTurnCrashedUnits.clear();
         if (!crashedAirUnits.isEmpty()) {
+            lastTurnCrashedUnits.addAll(crashedAirUnits);
             engine.units.removeAll(crashedAirUnits);
         }
 
