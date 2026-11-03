@@ -1420,25 +1420,74 @@ public class MainActivity extends Activity implements PgMapView.MapInteractionLi
     @Override
     public void onCoreUnitDeployRequested(PgDatabase.ActiveUnit unit, int col, int row) {
         if (unit == null) return;
+        PgDatabase.UnitDef deployedDef = (unit.unitDefId > 0 && unit.unitDefId < db.equipment.size()) ? db.equipment.get(unit.unitDefId) : null;
+        int deployedIndex = engine.unplacedCoreUnits.indexOf(unit);
+        int deployedClass = deployedDef != null ? deployedDef.unitClass : -1;
+        boolean deployedIsAir = deployedDef != null && deployedDef.isAir();
+
         if (engine.deployCoreUnit(unit, col, row)) {
             sounds.playSelect();
             boolean inSea = unit.inSeaTransport;
-            boolean isAir = db.equipment.get(unit.unitDefId).isAir();
+            boolean isAir = deployedIsAir;
             boolean isWater = engine.scenario != null && engine.scenario.grid[col][row].isWater();
             String tag = inSea ? " [Naval Transport]" : (isAir && isWater ? " [Airborne Over Sea]" : "");
-            String msg = "Deployed " + db.equipment.get(unit.unitDefId).name + " at (" + col + "," + row + ")" + tag;
+            String msg = "Deployed " + (deployedDef != null ? deployedDef.name : "Unit") + " at (" + col + "," + row + ")" + tag;
 
-            // Automatically pick the next unit in the reserve list to deploy
+            // Automatically pick the next unit in the reserve list to deploy:
+            // Follow the list order; if a unit of a given type was just deployed (e.g. fighter),
+            // prioritize the next unit of the same type/class in the reserve list.
             PgDatabase.ActiveUnit nextUnit = null;
             if (!engine.unplacedCoreUnits.isEmpty()) {
-                for (PgDatabase.ActiveUnit candidate : engine.unplacedCoreUnits) {
-                    if (candidate != null && !engine.getValidCoreDeploymentHexes(candidate).isEmpty()) {
-                        nextUnit = candidate;
-                        break;
+                int numReserves = engine.unplacedCoreUnits.size();
+                int startIdx = (deployedIndex >= 0 && deployedIndex < numReserves) ? deployedIndex : 0;
+
+                // Priority 1: Pick the next unit of the same exact class (e.g. next fighter)
+                // starting from the position directly after the deployed unit in the reserve list
+                if (deployedClass >= 0) {
+                    for (int i = 0; i < numReserves; i++) {
+                        int idx = (startIdx + i) % numReserves;
+                        PgDatabase.ActiveUnit candidate = engine.unplacedCoreUnits.get(idx);
+                        if (candidate != null && candidate.unitDefId > 0 && candidate.unitDefId < db.equipment.size()) {
+                            PgDatabase.UnitDef cDef = db.equipment.get(candidate.unitDefId);
+                            if (cDef != null && cDef.unitClass == deployedClass && !engine.getValidCoreDeploymentHexes(candidate).isEmpty()) {
+                                nextUnit = candidate;
+                                break;
+                            }
+                        }
                     }
                 }
+
+                // Priority 2: If none of same exact class, and deployed unit was air, check for next air unit
+                // (e.g. tac bomber or level bomber) with valid deployment hexes
+                if (nextUnit == null && deployedIsAir) {
+                    for (int i = 0; i < numReserves; i++) {
+                        int idx = (startIdx + i) % numReserves;
+                        PgDatabase.ActiveUnit candidate = engine.unplacedCoreUnits.get(idx);
+                        if (candidate != null && candidate.unitDefId > 0 && candidate.unitDefId < db.equipment.size()) {
+                            PgDatabase.UnitDef cDef = db.equipment.get(candidate.unitDefId);
+                            if (cDef != null && cDef.isAir() && !engine.getValidCoreDeploymentHexes(candidate).isEmpty()) {
+                                nextUnit = candidate;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Priority 3: Pick the next unit in the list (starting from startIdx) with valid deployment hexes
                 if (nextUnit == null) {
-                    nextUnit = engine.unplacedCoreUnits.get(0);
+                    for (int i = 0; i < numReserves; i++) {
+                        int idx = (startIdx + i) % numReserves;
+                        PgDatabase.ActiveUnit candidate = engine.unplacedCoreUnits.get(idx);
+                        if (candidate != null && !engine.getValidCoreDeploymentHexes(candidate).isEmpty()) {
+                            nextUnit = candidate;
+                            break;
+                        }
+                    }
+                }
+
+                // Priority 4: Fallback to next unit in list even if without open deploy hexes
+                if (nextUnit == null) {
+                    nextUnit = engine.unplacedCoreUnits.get(startIdx % numReserves);
                 }
             }
 
